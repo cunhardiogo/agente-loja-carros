@@ -29,6 +29,19 @@ def enviar_texto(numero: str, texto: str) -> dict:
     return _send(inst, key, numero, texto)
 
 
+def get_media_base64(instance: str, apikey: str, message_data: dict) -> tuple[str | None, str | None]:
+    """Baixa a mídia (áudio/imagem) de uma mensagem e retorna (base64, mimetype)."""
+    with httpx.Client(base_url=_base, headers={"apikey": apikey, "Content-Type": "application/json"},
+                      verify=settings.verify_ssl, timeout=60) as c:
+        for body in ({"message": message_data, "convertToMp4": False},
+                     {"message": {"key": message_data.get("key")}}):
+            r = c.post(f"/chat/getBase64FromMediaMessage/{instance}", json=body)
+            if r.status_code < 400:
+                j = r.json()
+                return j.get("base64"), j.get("mimetype")
+        return None, None
+
+
 def notificar_dono(texto: str) -> None:
     if settings.meu_numero:
         try:

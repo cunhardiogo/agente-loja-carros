@@ -1,3 +1,4 @@
+import io
 from datetime import date
 
 import httpx
@@ -51,3 +52,37 @@ def extrair(mensagem: str, grupo_nome: str, grupo_tipo: str | None, vendedores: 
         temperature=0,
     )
     return resp.choices[0].message.parsed
+
+
+def transcrever_audio(audio_bytes: bytes, mimetype: str | None) -> str:
+    if _client is None:
+        raise RuntimeError("OPENAI_API_KEY não configurada")
+    ext = "ogg" if "ogg" in (mimetype or "") else ("mp3" if "mp" in (mimetype or "") else "ogg")
+    f = io.BytesIO(audio_bytes)
+    f.name = f"audio.{ext}"
+    r = _client.audio.transcriptions.create(model="whisper-1", file=f, language="pt")
+    return (r.text or "").strip()
+
+
+VISAO_SYSTEM = """Você lê imagens enviadas em grupos de uma loja de carros.
+Transcreva TODO texto e números visíveis (documentos, prints de proposta, tabelas, placas, anúncios com preço).
+Se for foto de um veículo, descreva marca/modelo/cor quando der pra identificar.
+Responda apenas com o conteúdo lido, sem comentários seus."""
+
+
+def ler_imagem(image_b64: str, mimetype: str | None) -> str:
+    if _client is None:
+        raise RuntimeError("OPENAI_API_KEY não configurada")
+    data_uri = f"data:{mimetype or 'image/jpeg'};base64,{image_b64}"
+    resp = _client.chat.completions.create(
+        model=settings.openai_model_consulta,
+        messages=[
+            {"role": "system", "content": VISAO_SYSTEM},
+            {"role": "user", "content": [
+                {"type": "text", "text": "Leia esta imagem:"},
+                {"type": "image_url", "image_url": {"url": data_uri}},
+            ]},
+        ],
+        temperature=0,
+    )
+    return (resp.choices[0].message.content or "").strip()

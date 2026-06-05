@@ -2,25 +2,13 @@ import logging
 
 from fastapi import FastAPI, Request
 
-from . import consulta, db, evolution, ingest
+from . import consulta, db, evolution, ingest, media
 from .config import settings
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("agente")
 
 app = FastAPI(title="Agente Loja de Carros — Grupo SB")
-
-
-def _extrair_texto(msg: dict) -> str | None:
-    if not msg:
-        return None
-    if msg.get("conversation"):
-        return msg["conversation"]
-    if msg.get("extendedTextMessage"):
-        return msg["extendedTextMessage"].get("text")
-    if msg.get("imageMessage"):
-        return msg["imageMessage"].get("caption")
-    return None
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
@@ -38,12 +26,14 @@ async def webhook(request: Request):
     jid = key.get("remoteJid", "")
     message_id = key.get("id")
     from_me = bool(key.get("fromMe"))
-    texto = _extrair_texto(data.get("message") or {})
-
-    if not texto:
-        return {"ignored": "sem_texto"}
 
     eh_assistente = bool(settings.evolution_assist_instance) and instancia == settings.evolution_assist_instance
+    apikey = settings.evolution_assist_apikey if eh_assistente else settings.evolution_apikey
+
+    # texto direto OU transcrição de áudio OU leitura de imagem
+    texto = media.conteudo_texto(instancia, apikey, data)
+    if not texto:
+        return {"ignored": "sem_conteudo"}
 
     # DM no número assistente -> consulta do dono (Fase 3)
     if not jid.endswith("@g.us"):
