@@ -1,9 +1,9 @@
 import io
-from datetime import date
 
 import httpx
 from openai import OpenAI
 
+from . import datas
 from .config import settings
 from .schemas import Extracao
 
@@ -28,6 +28,9 @@ Regras:
 - Resolva datas relativas ("hoje", "amanhã", "sexta") para ISO YYYY-MM-DD usando a data de hoje informada.
 - valor sempre em número (reais), sem "R$" nem pontos de milhar.
 - Nomes: use exatamente como aparecem; a resolução com o cadastro é feita depois.
+- Em pagamento, entrega e comparecimento, SEMPRE capture cliente_nome (e o veículo, se houver) para localizar o registro existente.
+- data_entrega = data prevista de entrega, quando mencionada (ex.: "entrega sexta").
+- Em comparecimento, defina compareceu=true se o cliente veio/compareceu, false se faltou/não veio.
 - Responda SOMENTE com o objeto estruturado."""
 
 
@@ -40,7 +43,7 @@ def extrair(mensagem: str, grupo_nome: str, grupo_tipo: str | None, vendedores: 
         for v in vendedores
     )
     contexto = (
-        f"Data de hoje: {date.today().isoformat()}\n"
+        f"Data de hoje: {datas.hoje_iso()}\n"
         f"Grupo: {grupo_nome} (tipo: {grupo_tipo})\n"
         f"Equipe conhecida: {nomes}\n\n"
         f"Mensagem:\n{mensagem}"

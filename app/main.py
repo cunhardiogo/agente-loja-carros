@@ -1,8 +1,10 @@
 import logging
+import os
 
 from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 
-from . import consulta, db, evolution, ingest, media
+from . import confirmacao, consulta, db, evolution, ingest, media
 from .config import settings
 
 logging.basicConfig(level=logging.INFO)
@@ -74,8 +76,9 @@ async def webhook(request: Request):
 
 def _consulta(pergunta: str, numero: str):
     try:
-        resposta = consulta.responder(pergunta)
-    except Exception as e:
+        # primeiro tenta resolver uma confirmação pendente (sim/não/corrigir); senão, responde a pergunta
+        resposta = confirmacao.tentar_resolver(pergunta) or consulta.responder(pergunta)
+    except Exception:
         log.exception("erro na consulta")
         resposta = "Tive um problema ao consultar agora. Pode tentar de novo?"
     try:
@@ -83,3 +86,34 @@ def _consulta(pergunta: str, numero: str):
     except Exception:
         log.exception("erro enviando resposta")
     return {"consulta": pergunta, "respondido": True}
+
+
+# ===== Dashboard (servido pela própria Render) =====
+def _metrics() -> dict:
+    a_receber = consulta.pendencias("pagamento")
+    a_entregar = consulta.pendencias("entrega")
+    pendentes = db.select("eventos_brutos", {"select": "id", "status": "eq.pendente_confirmacao"})
+    return {
+        "vendas_mes": consulta.resumo_vendas("mes"),
+        "ranking": consulta.ranking_vendedores("mes")["ranking"],
+        "a_receber": {"quantidade": a_receber["quantidade"], "valor": a_receber["valor_total_a_receber"],
+                      "itens": a_receber["itens"]},
+        "a_entregar": {"quantidade": a_entregar["quantidade"], "itens": a_entregar["itens"]},
+        "estoque": consulta.listar_carros("anunciado"),
+        "agendamentos": consulta.resumo_agendamentos("mes"),
+        "pendentes_confirmacao": len(pendentes),
+    }
+
+
+@app.get("/api/metrics")
+def api_metrics(token: str = ""):
+    if not settings.dashboard_token or token != settings.dashboard_token:
+        return JSONResponse({"erro": "não autorizado"}, status_code=401)
+    return _metrics()
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard():
+    caminho = os.path.join(os.path.dirname(__file__), "static", "dashboard.html")
+    with open(caminho, encoding="utf-8") as f:
+        return HTMLResponse(f.read())

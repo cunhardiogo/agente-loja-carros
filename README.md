@@ -35,8 +35,15 @@ Schema em `db/schema.sql`, seed em `db/seed.sql`. Já aplicados no projeto Supab
 
 ## Status das fases
 - [x] Fase 0 — Infra (schema + seed + scaffold)
-- [~] Fase 1 — Ingestão vendas/estoque/agendamento (MVP feito; falta OPENAI_API_KEY pra testar)
-- [ ] Fase 2 — comparecimento/pagamento/entrega (update de registros) + loop de confirmação (sim/não/corrigir)
-- [ ] Fase 3 — Agente de consulta (Q&A WhatsApp) + resumo diário
-- [ ] Fase 4 — Dashboard React
-- [ ] Fase 5 — Refino (dedup avançado, prompts, relatórios)
+- [x] Fase 1 — Ingestão vendas/estoque/agendamento (IA structured output)
+- [x] Fase 2 — comparecimento/pagamento/entrega (UPDATE) + loop de confirmação (sim/não/corrigir)
+- [x] Fase 3 — Agente de consulta (Q&A WhatsApp, function calling)
+- [x] Fase 4 — Mídia: ouve áudio (Whisper) e lê imagem/documento (visão)
+- [x] Fase 5 — Dashboard (servido em /dashboard, protegido por DASHBOARD_TOKEN)
+
+## Dashboard
+`https://<app>.onrender.com/dashboard?token=<DASHBOARD_TOKEN>` — KPIs, ranking, a receber/entregar,
+comparecimento e estoque. Requer env var `DASHBOARD_TOKEN` configurada na Render.
+
+## Timezone
+Datas usam America/Sao_Paulo (`app/datas.py`), não o UTC do servidor.

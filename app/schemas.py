@@ -35,6 +35,7 @@ class Extracao(BaseModel):
 
     data_evento: str | None = Field(None, description="Data do evento em ISO YYYY-MM-DD")
     data_agendada: str | None = Field(None, description="Data/hora do agendamento em ISO")
+    data_entrega: str | None = Field(None, description="Data prevista de entrega em ISO, se mencionada")
     compareceu: bool | None = None
 
     status_pagamento: str | None = Field(None, description="pendente|parcial|pago")

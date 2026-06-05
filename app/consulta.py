@@ -1,10 +1,10 @@
 import json
-from datetime import date, timedelta
+from datetime import timedelta
 
 import httpx
 from openai import OpenAI
 
-from . import db
+from . import datas, db
 from .config import settings
 from .ingest import resolver_pessoa
 
@@ -14,7 +14,7 @@ _client = OpenAI(api_key=settings.openai_api_key, http_client=_http) if settings
 
 # ===== helpers =====
 def _range(periodo: str | None):
-    hoje = date.today()
+    hoje = datas.hoje()
     p = (periodo or "mes").lower()
     if p == "hoje":
         return hoje.isoformat(), hoje.isoformat()

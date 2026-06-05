@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     meu_numero: str = ""
     confianca_minima: float = 0.8
     verify_ssl: bool = True
+    dashboard_token: str = ""
 
 
 settings = Settings()

@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Painel — Loja SB</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>body{background:#0b1020}</style>
+</head>
+<body class="text-slate-100 min-h-screen">
+<div class="max-w-6xl mx-auto p-5">
+  <header class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-2xl font-bold">🚗 Painel — Loja SB</h1>
+      <p class="text-slate-400 text-sm" id="subtitulo">Carregando…</p>
+    </div>
+    <button onclick="carregar()" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm font-medium">Atualizar</button>
+  </header>
+
+  <div id="erro" class="hidden bg-red-900/40 border border-red-700 text-red-200 rounded-lg p-4 mb-4"></div>
+
+  <section class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+    <div class="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
+      <p class="text-slate-400 text-xs uppercase">Vendas no mês</p>
+      <p class="text-3xl font-bold" id="kpi_qtd">—</p>
+      <p class="text-emerald-400 text-sm" id="kpi_total">—</p>
+    </div>
+    <div class="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
+      <p class="text-slate-400 text-xs uppercase">Ticket médio</p>
+      <p class="text-3xl font-bold" id="kpi_ticket">—</p>
+    </div>
+    <div class="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
+      <p class="text-slate-400 text-xs uppercase">A receber</p>
+      <p class="text-3xl font-bold text-amber-400" id="kpi_receber">—</p>
+      <p class="text-slate-400 text-sm" id="kpi_receber_qtd">—</p>
+    </div>
+    <div class="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
+      <p class="text-slate-400 text-xs uppercase">A entregar</p>
+      <p class="text-3xl font-bold text-sky-400" id="kpi_entregar">—</p>
+    </div>
+  </section>
+
+  <section class="grid md:grid-cols-2 gap-4 mb-6">
+    <div class="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
+      <h2 class="font-semibold mb-3">Ranking de vendedores (mês)</h2>
+      <canvas id="grafRanking" height="180"></canvas>
+    </div>
+    <div class="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
+      <h2 class="font-semibold mb-3">Agendamentos (mês)</h2>
+      <div class="grid grid-cols-3 gap-3 text-center">
+        <div><p class="text-2xl font-bold text-emerald-400" id="ag_vieram">—</p><p class="text-xs text-slate-400">Compareceram</p></div>
+        <div><p class="text-2xl font-bold text-red-400" id="ag_faltaram">—</p><p class="text-xs text-slate-400">Faltaram</p></div>
+        <div><p class="text-2xl font-bold" id="ag_taxa">—</p><p class="text-xs text-slate-400">Taxa</p></div>
+      </div>
+      <p class="text-slate-400 text-sm mt-3" id="ag_total"></p>
+      <div class="mt-3 p-3 rounded-lg bg-amber-900/30 border border-amber-700/50 text-amber-200 text-sm hidden" id="box_pend"></div>
+    </div>
+  </section>
+
+  <section class="grid md:grid-cols-2 gap-4 mb-6">
+    <div class="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
+      <h2 class="font-semibold mb-3">💰 A receber</h2>
+      <ul id="lista_receber" class="text-sm divide-y divide-slate-700"></ul>
+    </div>
+    <div class="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
+      <h2 class="font-semibold mb-3">📦 A entregar</h2>
+      <ul id="lista_entregar" class="text-sm divide-y divide-slate-700"></ul>
+    </div>
+  </section>
+
+  <section class="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
+    <h2 class="font-semibold mb-3">🏷️ Estoque anunciado (<span id="estoque_qtd">0</span>)</h2>
+    <ul id="lista_estoque" class="text-sm grid md:grid-cols-2 gap-x-6"></ul>
+  </section>
+  <p class="text-center text-slate-600 text-xs mt-6">Atualizado em <span id="atualizado">—</span></p>
+</div>
+
+<script>
+const brl = v => (v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0});
+let chart;
+
+function token(){
+  let t = new URLSearchParams(location.search).get('token') || localStorage.getItem('sb_token');
+  if(!t){ t = prompt('Token de acesso do painel:'); if(t) localStorage.setItem('sb_token', t); }
+  else localStorage.setItem('sb_token', t);
+  return t;
+}
+
+async function carregar(){
+  const erro = document.getElementById('erro'); erro.classList.add('hidden');
+  try{
+    const r = await fetch('/api/metrics?token='+encodeURIComponent(token()));
+    if(r.status===401){ localStorage.removeItem('sb_token'); throw new Error('Token inválido. Recarregue a página.'); }
+    const d = await r.json();
+    render(d);
+  }catch(e){ erro.textContent = e.message; erro.classList.remove('hidden'); }
+}
+
+function render(d){
+  const v = d.vendas_mes;
+  document.getElementById('subtitulo').textContent = 'Visão do mês atual';
+  document.getElementById('kpi_qtd').textContent = v.quantidade;
+  document.getElementById('kpi_total').textContent = brl(v.valor_total);
+  document.getElementById('kpi_ticket').textContent = brl(v.ticket_medio);
+  document.getElementById('kpi_receber').textContent = brl(d.a_receber.valor);
+  document.getElementById('kpi_receber_qtd').textContent = d.a_receber.quantidade + ' venda(s)';
+  document.getElementById('kpi_entregar').textContent = d.a_entregar.quantidade;
+
+  // ranking
+  const labels = d.ranking.map(x=>x.vendedor), valores = d.ranking.map(x=>x.valor_total);
+  if(chart) chart.destroy();
+  chart = new Chart(document.getElementById('grafRanking'),{
+    type:'bar',
+    data:{labels,datasets:[{label:'R$ vendido',data:valores,backgroundColor:'#6366f1',borderRadius:6}]},
+    options:{plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#94a3b8'},grid:{display:false}},y:{ticks:{color:'#94a3b8',callback:v=>'R$ '+(v/1000)+'k'},grid:{color:'#1e293b'}}}}
+  });
+
+  const a = d.agendamentos;
+  document.getElementById('ag_vieram').textContent = a.compareceram;
+  document.getElementById('ag_faltaram').textContent = a.faltaram;
+  document.getElementById('ag_taxa').textContent = a.taxa_comparecimento + '%';
+  document.getElementById('ag_total').textContent = a.total + ' agendamento(s) · ' + a.sem_info + ' sem confirmação';
+
+  const box = document.getElementById('box_pend');
+  if(d.pendentes_confirmacao>0){ box.textContent='⚠️ '+d.pendentes_confirmacao+' evento(s) aguardando sua confirmação no WhatsApp'; box.classList.remove('hidden'); }
+  else box.classList.add('hidden');
+
+  lista('lista_receber', d.a_receber.itens, x=>`${x.cliente_nome||'—'} <span class="text-amber-400 float-right">${brl(x.valor_venda)}</span>`);
+  lista('lista_entregar', d.a_entregar.itens, x=>`${x.cliente_nome||'—'} <span class="text-slate-400 float-right">${x.data_entrega_prevista||'sem data'}</span>`);
+  document.getElementById('estoque_qtd').textContent = d.estoque.quantidade;
+  lista('lista_estoque', d.estoque.carros, x=>`${[x.marca,x.modelo,x.ano].filter(Boolean).join(' ')} <span class="text-emerald-400 float-right">${brl(x.preco_anuncio)}</span>`);
+
+  document.getElementById('atualizado').textContent = new Date().toLocaleString('pt-BR');
+}
+
+function lista(id, itens, fmt){
+  const el = document.getElementById(id);
+  el.innerHTML = (itens && itens.length) ? itens.map(x=>`<li class="py-2">${fmt(x)}</li>`).join('') : '<li class="py-2 text-slate-500">Nada por aqui</li>';
+}
+
+carregar();
+</script>
+</body>
+</html>
