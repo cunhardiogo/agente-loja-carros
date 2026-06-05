@@ -4,7 +4,7 @@ import os
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from . import confirmacao, consulta, db, evolution, ingest, media
+from . import confirmacao, consulta, datas, db, evolution, ingest, media
 from .config import settings
 
 logging.basicConfig(level=logging.INFO)
@@ -117,3 +117,35 @@ def dashboard():
     caminho = os.path.join(os.path.dirname(__file__), "static", "dashboard.html")
     with open(caminho, encoding="utf-8") as f:
         return HTMLResponse(f.read())
+
+
+# ===== Resumo diário (disparado por agendador externo) =====
+def _brl(x) -> str:
+    return f"R$ {(x or 0):,.0f}".replace(",", ".")
+
+
+def _resumo_diario_texto() -> str:
+    v = consulta.resumo_vendas("hoje")
+    ag = consulta.resumo_agendamentos("hoje")
+    receber = consulta.pendencias("pagamento")
+    entregar = consulta.pendencias("entrega")
+    pend = len(db.select("eventos_brutos", {"select": "id", "status": "eq.pendente_confirmacao"}))
+    linhas = [
+        f"📊 *Fechamento de hoje* ({datas.hoje().strftime('%d/%m')})",
+        f"🚗 Vendas: {v['quantidade']} — {_brl(v['valor_total'])}",
+        f"💰 A receber (total): {_brl(receber['valor_total_a_receber'])}",
+        f"📦 A entregar: {entregar['quantidade']} carro(s)",
+        f"📅 Agendamentos hoje: {ag['total']} (✅ {ag['compareceram']} | ❌ {ag['faltaram']})",
+    ]
+    if pend:
+        linhas.append(f"⚠️ {pend} pendente(s) de confirmação")
+    return "\n".join(linhas)
+
+
+@app.api_route("/cron/resumo-diario", methods=["GET", "POST"])
+def cron_resumo(token: str = ""):
+    if not settings.dashboard_token or token != settings.dashboard_token:
+        return JSONResponse({"erro": "não autorizado"}, status_code=401)
+    texto = _resumo_diario_texto()
+    evolution.notificar_dono(texto)
+    return {"enviado": True, "resumo": texto}
