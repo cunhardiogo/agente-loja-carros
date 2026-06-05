@@ -23,7 +23,8 @@ def _extrair_texto(msg: dict) -> str | None:
     return None
 
 
-@app.get("/health")
+@app.api_route("/", methods=["GET", "HEAD"])
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health():
     return {"ok": True}
 
