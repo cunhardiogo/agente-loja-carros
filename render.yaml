@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: agente-loja-carros
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL_EXTRACAO
+        value: gpt-4.1-mini
+      - key: OPENAI_MODEL_CONSULTA
+        value: gpt-4.1
+      - key: EVOLUTION_URL
+        sync: false
+      - key: EVOLUTION_INSTANCE
+        sync: false
+      - key: EVOLUTION_APIKEY
+        sync: false
+      - key: EVOLUTION_ASSIST_INSTANCE
+        sync: false
+      - key: EVOLUTION_ASSIST_APIKEY
+        sync: false
+      - key: MEU_NUMERO
+        sync: false
+      - key: CONFIANCA_MINIMA
+        value: "0.8"
+      - key: VERIFY_SSL
+        value: "true"
