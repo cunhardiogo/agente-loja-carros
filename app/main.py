@@ -2,7 +2,7 @@ import logging
 
 from fastapi import FastAPI, Request
 
-from . import db, ingest
+from . import consulta, db, evolution, ingest
 from .config import settings
 
 logging.basicConfig(level=logging.INFO)
@@ -37,6 +37,7 @@ async def webhook(request: Request):
     key = data.get("key") or {}
     jid = key.get("remoteJid", "")
     message_id = key.get("id")
+    from_me = bool(key.get("fromMe"))
     texto = _extrair_texto(data.get("message") or {})
 
     if not texto:
@@ -44,12 +45,14 @@ async def webhook(request: Request):
 
     eh_assistente = bool(settings.evolution_assist_instance) and instancia == settings.evolution_assist_instance
 
-    # DM do dono no número assistente -> consulta (Fase 3)
+    # DM no número assistente -> consulta do dono (Fase 3)
     if not jid.endswith("@g.us"):
+        if from_me:
+            return {"ignored": "dm_propria"}  # evita reprocessar a resposta do bot
         numero = jid.split("@")[0]
         autorizado = settings.meu_numero and numero == settings.meu_numero
         if autorizado and (eh_assistente or not settings.evolution_assist_instance):
-            return await _consulta(texto)
+            return _consulta(texto, numero)
         return {"ignored": "dm_nao_autorizado"}
 
     # Grupos só são ingeridos pelo coletor, nunca pelo assistente
@@ -79,6 +82,14 @@ async def webhook(request: Request):
         return {"error": str(e)}
 
 
-async def _consulta(pergunta: str):
-    # Fase 3: traduzir pergunta -> consulta no Supabase -> resposta natural.
-    return {"consulta": pergunta, "todo": "Q&A natural ainda não implementado (Fase 3)"}
+def _consulta(pergunta: str, numero: str):
+    try:
+        resposta = consulta.responder(pergunta)
+    except Exception as e:
+        log.exception("erro na consulta")
+        resposta = "Tive um problema ao consultar agora. Pode tentar de novo?"
+    try:
+        evolution.enviar_texto(numero, resposta)
+    except Exception:
+        log.exception("erro enviando resposta")
+    return {"consulta": pergunta, "respondido": True}
