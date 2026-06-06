@@ -54,6 +54,7 @@ class Extracao(BaseModel):
     retorno: str | None = None
     forma_pagamento: str | None = None
     banco: str | None = None
+    valor_entrada: float | None = Field(None, description="Soma do que o cliente JÁ pagou agora (à vista, sinal, entrada, pix já feito). NÃO incluir 'será depositado/a depositar/restante', financiamento nem troca.")
     valor_financiado: float | None = None
     valor_pix: str | None = Field(None, description="Pode ser texto, ex '10.000 + 66.900'")
     valor_avista: float | None = None

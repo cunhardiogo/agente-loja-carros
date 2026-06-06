@@ -143,7 +143,10 @@ function render(d){
   if(d.pendentes_confirmacao>0){ box.textContent='⚠️ '+d.pendentes_confirmacao+' evento(s) aguardando sua confirmação no WhatsApp'; box.classList.remove('hidden'); }
   else box.classList.add('hidden');
 
-  lista('lista_receber', d.a_receber.itens, x=>`${x.cliente_nome||'—'} <span class="text-amber-400 float-right">${brl(x.valor_venda)}</span>`);
+  lista('lista_receber', d.a_receber.itens, x=>{
+    const comp = [x.ja_pago?('pago '+brl(x.ja_pago)):'', x.financiado?('financ '+brl(x.financiado)):'', x.troca?('troca '+brl(x.troca)):''].filter(Boolean).join(' · ');
+    return `<div class="flex justify-between"><span>${x.cliente_nome||'—'} <span class="text-slate-500">${x.veiculo||''}</span></span><span class="text-amber-400">${brl(x.a_receber)}</span></div>${comp?`<div class="text-xs text-slate-500">vendido ${brl(x.valor_vendido)} · ${comp}</div>`:''}`;
+  });
   lista('lista_entregar', d.a_entregar.itens, x=>`${x.cliente_nome||'—'} <span class="text-slate-400 float-right">${x.data_entrega_prevista||'sem data'}</span>`);
   document.getElementById('entregas_qtd').textContent = d.entregas.quantidade;
   lista('lista_entregas', d.entregas.entregas, x=>`${x.veiculo||'—'} <span class="text-slate-400 float-right">${(x.data_entrega||'')+' '+(x.horario||'')}</span><br><span class="text-xs text-slate-500">${x.vendedor||''} ${x.observacao?('· '+x.observacao):''}</span>`);

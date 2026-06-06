@@ -87,6 +87,7 @@ def aplicar(ext: Extracao) -> tuple[str | None, str | None]:
             "valor_venda": ext.valor, "tabela_preco": ext.tabela_preco, "desconto": ext.desconto,
             "over_valor": ext.over_valor, "retorno": ext.retorno,
             "forma_pagamento": ext.forma_pagamento, "banco": ext.banco,
+            "valor_entrada": ext.valor_entrada,
             "valor_financiado": ext.valor_financiado, "valor_pix": ext.valor_pix,
             "valor_avista": ext.valor_avista, "debitos": ext.debitos, "valor_total": ext.valor_total,
             "ipva": ext.ipva, "beneficios": ext.beneficios, "portal_venda": ext.portal_venda,
@@ -165,7 +166,8 @@ def aplicar(ext: Extracao) -> tuple[str | None, str | None]:
         v = _venda_pendente(ext.cliente_nome, "status_entrega")
         if not v:
             return None, None
-        db.update("vendas", {"status_entrega": "entregue", "data_entrega_real": datas.hoje_iso()},
+        db.update("vendas", {"status_entrega": "entregue", "data_entrega_real": datas.hoje_iso(),
+                             "status_pagamento": "pago"},  # entrega = quitado
                   {"id": f"eq.{v['id']}"})
         return "vendas", v["id"]
 

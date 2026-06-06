@@ -37,6 +37,7 @@ Regras:
 - confianca = sua certeza (0 a 1). Dúvida = menor.
 - Datas relativas → ISO YYYY-MM-DD usando a data de hoje. Datas dd/mm/aaaa → ISO.
 - Valores numéricos em reais, sem "R$" nem pontos de milhar (ex 76900). Exceção: valor_pix pode ser texto.
+- valor_entrada = SOMA de TODOS os valores de pix/sinal/entrada já pagos. Some todas as parcelas do Pix, EXCETO as explicitamente marcadas como "será depositado/a depositar/restante/devolvido". NÃO inclua financiamento nem valor da troca. Se "Banco: A vista", valor_entrada = valor total. Exemplos: "A vista — Pix: 10.000 + 66.900" → 76900; "Pix: 1.000 sinal + 70.900" → 71900; "Pix: 3.000 Sinal + 55.900 será depositado" → 3000; "Pix: 1.000 Sinal será devolvido na troca" → 0.
 - Checkboxes "(X) Sim ( ) Não" → true; "( ) Sim (X) Não" → false.
 - Nos formulários, copie os campos LITERALMENTE: 'Modelo:' → modelo e 'Versão:' → versao exatamente como escritos. NÃO reinterprete nem mova valores entre marca/modelo/versao (ex.: 'Modelo: Audi' / 'Versão: A3' → modelo='Audi', versao='A3').
 - Nomes exatamente como aparecem; a resolução com o cadastro é feita depois.

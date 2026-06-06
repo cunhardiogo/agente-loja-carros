@@ -92,12 +92,28 @@ def listar_carros(status: str = "anunciado") -> dict:
 def pendencias(tipo: str) -> dict:
     if tipo == "pagamento":
         rows = db.select("vendas", {
-            "select": "cliente_nome,valor_venda,data_venda,observacoes",
-            "status_pagamento": "eq.pendente",
+            "select": "cliente_nome,valor_venda,valor_total,valor_entrada,valor_financiado,troca_valor,"
+                      "status_pagamento,status_entrega,modelo,versao",
             "order": "data_venda.asc.nullsfirst",
         })
-        total = sum((r.get("valor_venda") or 0) for r in rows)
-        return {"tipo": "pagamento", "quantidade": len(rows), "valor_total_a_receber": total, "itens": rows}
+        itens, total = [], 0
+        for r in rows:
+            # entregue ou marcado pago = quitado, não entra no a receber
+            if r.get("status_entrega") == "entregue" or r.get("status_pagamento") == "pago":
+                continue
+            base = r.get("valor_total") or r.get("valor_venda") or 0
+            saldo = base - (r.get("valor_entrada") or 0)  # já pago em conta abate
+            if saldo <= 0:
+                continue
+            total += saldo
+            itens.append({
+                "cliente_nome": r.get("cliente_nome"),
+                "veiculo": " ".join(x for x in (r.get("modelo"), r.get("versao")) if x),
+                "valor_vendido": base, "ja_pago": r.get("valor_entrada") or 0,
+                "financiado": r.get("valor_financiado") or 0, "troca": r.get("troca_valor") or 0,
+                "a_receber": saldo,
+            })
+        return {"tipo": "pagamento", "quantidade": len(itens), "valor_total_a_receber": total, "itens": itens}
     rows = db.select("vendas", {
         "select": "cliente_nome,valor_venda,data_entrega_prevista,observacoes",
         "status_entrega": "eq.pendente",
