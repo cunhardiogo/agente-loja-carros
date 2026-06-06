@@ -38,6 +38,7 @@ Regras:
 - Datas relativas → ISO YYYY-MM-DD usando a data de hoje. Datas dd/mm/aaaa → ISO.
 - Valores numéricos em reais, sem "R$" nem pontos de milhar (ex 76900). Exceção: valor_pix pode ser texto.
 - Checkboxes "(X) Sim ( ) Não" → true; "( ) Sim (X) Não" → false.
+- Nos formulários, copie os campos LITERALMENTE: 'Modelo:' → modelo e 'Versão:' → versao exatamente como escritos. NÃO reinterprete nem mova valores entre marca/modelo/versao (ex.: 'Modelo: Audi' / 'Versão: A3' → modelo='Audi', versao='A3').
 - Nomes exatamente como aparecem; a resolução com o cadastro é feita depois.
 - Responda SOMENTE com o objeto estruturado."""
 
