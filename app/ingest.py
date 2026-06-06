@@ -158,19 +158,22 @@ def processar(grupo: dict, message_id: str | None, remetente: str | None,
     tabela = registro_id = None
     status = "auto"
 
-    if ext.tipo_evento != TipoEvento.nenhum:
-        if ext.confianca < settings.confianca_minima:
+    if ext.tipo_evento == TipoEvento.nenhum:
+        pass
+    elif ext.tipo_evento == TipoEvento.agendamento and not settings.agendamento_via_grupo:
+        status = "ignorado_planilha"  # agendamento é controlado pela planilha
+    elif ext.confianca < settings.confianca_minima:
+        status = "pendente_confirmacao"
+        evolution.notificar_dono(_pergunta_confirmacao(ext))
+    else:
+        tabela, registro_id = aplicar(ext)
+        if tabela == "duplicada":
+            tabela, status = None, "descartado"
+        elif registro_id:
+            status = "auto"
+        else:
             status = "pendente_confirmacao"
             evolution.notificar_dono(_pergunta_confirmacao(ext))
-        else:
-            tabela, registro_id = aplicar(ext)
-            if tabela == "duplicada":
-                tabela, status = None, "descartado"
-            elif registro_id:
-                status = "auto"
-            else:
-                status = "pendente_confirmacao"
-                evolution.notificar_dono(_pergunta_confirmacao(ext))
 
     evento = db.insert("eventos_brutos", {
         "grupo_id": grupo["id"], "message_id": message_id,
