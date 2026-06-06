@@ -124,8 +124,32 @@ def resumo_agendamentos(periodo: str = "semana", compareceu: bool | None = None)
     }
 
 
-def entregas_agendadas(periodo: str = "semana") -> dict:
+def vendidos(periodo: str = "mes") -> dict:
+    """Quantos carros VENDIDOS no período, segundo a planilha (Status=VENDIDO)."""
     ini, fim = _range(periodo)
+    rows = db.select("agendamentos", {"select": "cliente_nome,data_agendada,resultado,observacoes",
+                                      "origem": "eq.planilha"})
+    rows = [r for r in rows if (r.get("resultado") or "").strip().lower() == "vendido"
+            and _dentro(r.get("data_agendada"), ini, fim)]
+    return {"periodo": periodo, "quantidade": len(rows), "itens": rows}
+
+
+def _range_futuro(periodo: str | None):
+    import calendar
+    hoje = datas.hoje()
+    p = (periodo or "mes").lower()
+    if p == "hoje":
+        return hoje.isoformat(), hoje.isoformat()
+    if p == "semana":
+        return hoje.isoformat(), (hoje + timedelta(days=7)).isoformat()
+    if p == "mes":
+        ult = hoje.replace(day=calendar.monthrange(hoje.year, hoje.month)[1])
+        return hoje.isoformat(), ult.isoformat()
+    return hoje.isoformat(), (hoje + timedelta(days=365)).isoformat()
+
+
+def entregas_agendadas(periodo: str = "mes") -> dict:
+    ini, fim = _range_futuro(periodo)  # entregas são futuras: olha pra frente
     nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
     rows = db.select("entregas", {
         "select": "veiculo,data_entrega,horario,vendedor_id,observacao,status",
@@ -148,6 +172,7 @@ def listar_avaliacoes(periodo: str = "mes") -> dict:
 
 
 DISPATCH = {
+    "vendidos": vendidos,
     "resumo_vendas": resumo_vendas,
     "ranking_vendedores": ranking_vendedores,
     "listar_carros": listar_carros,
@@ -160,6 +185,11 @@ DISPATCH = {
 _PERIODO = {"type": "string", "enum": ["hoje", "ontem", "semana", "mes", "tudo"]}
 
 TOOLS = [
+    {"type": "function", "function": {
+        "name": "vendidos",
+        "description": "Quantos carros foram VENDIDOS no período (contagem confiável da planilha).",
+        "parameters": {"type": "object", "properties": {"periodo": _PERIODO}},
+    }},
     {"type": "function", "function": {
         "name": "resumo_vendas",
         "description": "Total de vendas, valor somado e ticket médio num período. Pode filtrar por um vendedor.",
@@ -203,6 +233,9 @@ TOOLS = [
 
 SYSTEM = """Você é o assistente da Loja SB (revenda de carros) respondendo o DONO no WhatsApp.
 Use SEMPRE as ferramentas para buscar dados reais — nunca invente números.
+IMPORTANTE: para CONTAR quantos carros foram vendidos use a ferramenta 'vendidos' (fonte oficial = planilha). \
+Para FATURAMENTO/valores/ticket use 'resumo_vendas'. Se perguntarem "quantos vendemos e quanto faturamos", \
+chame as DUAS e combine (ex.: "6 vendidos, R$ X faturados").
 Responda curto e direto, em português, formatando valores em reais como R$ 95.000.
 Para rankings/listas, use linhas curtas com emojis discretos. Se não houver dados, diga que não encontrou nada no período.
 Quando o usuário não especificar o período, assuma o mês atual."""

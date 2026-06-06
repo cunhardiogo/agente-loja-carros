@@ -94,6 +94,7 @@ def _metrics() -> dict:
     a_entregar = consulta.pendencias("entrega")
     pendentes = db.select("eventos_brutos", {"select": "id", "status": "eq.pendente_confirmacao"})
     return {
+        "vendidos_mes": consulta.vendidos("mes"),
         "vendas_mes": consulta.resumo_vendas("mes"),
         "ranking": consulta.ranking_vendedores("mes")["ranking"],
         "a_receber": {"quantidade": a_receber["quantidade"], "valor": a_receber["valor_total_a_receber"],
@@ -128,15 +129,17 @@ def _brl(x) -> str:
 
 def _resumo_diario_texto() -> str:
     v = consulta.resumo_vendas("hoje")
+    vend = consulta.vendidos("hoje")
     ag = consulta.resumo_agendamentos("hoje")
     receber = consulta.pendencias("pagamento")
-    entregar = consulta.pendencias("entrega")
+    entregar = consulta.entregas_agendadas("hoje")
     pend = len(db.select("eventos_brutos", {"select": "id", "status": "eq.pendente_confirmacao"}))
     linhas = [
         f"📊 *Fechamento de hoje* ({datas.hoje().strftime('%d/%m')})",
-        f"🚗 Vendas: {v['quantidade']} — {_brl(v['valor_total'])}",
+        f"🏆 Vendidos hoje: {vend['quantidade']}",
+        f"💵 Faturamento (c/ valor): {_brl(v['valor_total'])}",
         f"💰 A receber (total): {_brl(receber['valor_total_a_receber'])}",
-        f"📦 A entregar: {entregar['quantidade']} carro(s)",
+        f"📦 Entregas hoje: {entregar['quantidade']} carro(s)",
         f"📅 Agendamentos hoje: {ag['total']} (✅ {ag['compareceram']} | ❌ {ag['faltaram']})",
     ]
     if pend:

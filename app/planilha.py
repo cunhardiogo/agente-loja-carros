@@ -16,11 +16,15 @@ log = logging.getLogger("agente")
 # abas de mês de 2026 (Abril26, Maio26, ... Dezembro26)
 _ABA_MES = re.compile(r"26\s*$")
 
-_STATUS_COMPARECEU = {
-    "REALIZADO": True, "VENDIDO": True, "COMPARECEU": True, "FINALIZADO": True,
-    "CANCELADO": False, "NAO COMPARECEU": False, "FALTOU": False,
-    "AGENDADO": None, "REMARCADO": None,
-}
+def _compareceu(status: str):
+    s = _norm(status)
+    if not s:
+        return None
+    if s.startswith(("vendido", "realizado", "finalizado", "entregue")):
+        return True
+    if s.startswith(("cancel", "faltou")) or "nao veio" in s or "nao compareceu" in s:
+        return False
+    return None  # agendado, negociação, ligação, etc.
 
 _HEADER_MAP = {
     "cliente": "cliente", "vendedor": "vendedor", "data": "data",
@@ -141,7 +145,8 @@ def sincronizar() -> dict:
                 "cliente_nome": cliente,
                 "vendedor_id": vend["id"] if vend else None,
                 "data_agendada": data_iso,
-                "compareceu": _STATUS_COMPARECEU.get(status.upper()),
+                "compareceu": _compareceu(status),
+                "resultado": status or None,
                 "origem": "planilha",
                 "ref_externa": ref,
                 "observacoes": " · ".join([p for p in (aba, status, veiculo, canal) if p]),
