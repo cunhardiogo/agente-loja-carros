@@ -124,12 +124,37 @@ def resumo_agendamentos(periodo: str = "semana", compareceu: bool | None = None)
     }
 
 
+def entregas_agendadas(periodo: str = "semana") -> dict:
+    ini, fim = _range(periodo)
+    nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
+    rows = db.select("entregas", {
+        "select": "veiculo,data_entrega,horario,vendedor_id,observacao,status",
+        "order": "data_entrega.asc.nullslast",
+    })
+    rows = [r for r in rows if _dentro(r.get("data_entrega"), ini, fim)]
+    for r in rows:
+        r["vendedor"] = nomes.get(r.pop("vendedor_id"), "—")
+    return {"periodo": periodo, "quantidade": len(rows), "entregas": rows}
+
+
+def listar_avaliacoes(periodo: str = "mes") -> dict:
+    ini, fim = _range(periodo)
+    rows = db.select("avaliacoes", {
+        "select": "carro_troca,modelo,ano,km,fipe,valor_avaliacao,created_at,obs",
+        "order": "created_at.desc",
+    })
+    rows = [r for r in rows if _dentro(r.get("created_at"), ini, fim)]
+    return {"periodo": periodo, "quantidade": len(rows), "avaliacoes": rows}
+
+
 DISPATCH = {
     "resumo_vendas": resumo_vendas,
     "ranking_vendedores": ranking_vendedores,
     "listar_carros": listar_carros,
     "pendencias": pendencias,
     "resumo_agendamentos": resumo_agendamentos,
+    "entregas_agendadas": entregas_agendadas,
+    "listar_avaliacoes": listar_avaliacoes,
 }
 
 _PERIODO = {"type": "string", "enum": ["hoje", "ontem", "semana", "mes", "tudo"]}
@@ -163,6 +188,16 @@ TOOLS = [
         "description": "Agendamentos num período e taxa de comparecimento. compareceu=false lista quem faltou.",
         "parameters": {"type": "object", "properties": {
             "periodo": _PERIODO, "compareceu": {"type": "boolean"}}},
+    }},
+    {"type": "function", "function": {
+        "name": "entregas_agendadas",
+        "description": "Entregas agendadas (lista do grupo de entregas) num período, com veículo, horário e vendedor.",
+        "parameters": {"type": "object", "properties": {"periodo": _PERIODO}},
+    }},
+    {"type": "function", "function": {
+        "name": "listar_avaliacoes",
+        "description": "Avaliações de carros (troca) num período, com FIPE e valor avaliado.",
+        "parameters": {"type": "object", "properties": {"periodo": _PERIODO}},
     }},
 ]
 

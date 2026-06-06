@@ -69,6 +69,17 @@
     </div>
   </section>
 
+  <section class="grid md:grid-cols-2 gap-4 mb-6">
+    <div class="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
+      <h2 class="font-semibold mb-3">🎁 Próximas entregas (<span id="entregas_qtd">0</span>)</h2>
+      <ul id="lista_entregas" class="text-sm divide-y divide-slate-700"></ul>
+    </div>
+    <div class="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
+      <h2 class="font-semibold mb-3">🔎 Avaliações do mês (<span id="aval_qtd">0</span>)</h2>
+      <ul id="lista_aval" class="text-sm divide-y divide-slate-700"></ul>
+    </div>
+  </section>
+
   <section class="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
     <h2 class="font-semibold mb-3">🏷️ Estoque anunciado (<span id="estoque_qtd">0</span>)</h2>
     <ul id="lista_estoque" class="text-sm grid md:grid-cols-2 gap-x-6"></ul>
@@ -128,6 +139,11 @@ function render(d){
 
   lista('lista_receber', d.a_receber.itens, x=>`${x.cliente_nome||'—'} <span class="text-amber-400 float-right">${brl(x.valor_venda)}</span>`);
   lista('lista_entregar', d.a_entregar.itens, x=>`${x.cliente_nome||'—'} <span class="text-slate-400 float-right">${x.data_entrega_prevista||'sem data'}</span>`);
+  document.getElementById('entregas_qtd').textContent = d.entregas.quantidade;
+  lista('lista_entregas', d.entregas.entregas, x=>`${x.veiculo||'—'} <span class="text-slate-400 float-right">${(x.data_entrega||'')+' '+(x.horario||'')}</span><br><span class="text-xs text-slate-500">${x.vendedor||''} ${x.observacao?('· '+x.observacao):''}</span>`);
+  document.getElementById('aval_qtd').textContent = d.avaliacoes.quantidade;
+  lista('lista_aval', d.avaliacoes.avaliacoes, x=>`${x.carro_troca||x.modelo||'—'} <span class="text-emerald-400 float-right">${x.valor_avaliacao?brl(x.valor_avaliacao):(x.fipe?('FIPE '+brl(x.fipe)):'')}</span>`);
+
   document.getElementById('estoque_qtd').textContent = d.estoque.quantidade;
   lista('lista_estoque', d.estoque.carros, x=>`${[x.marca,x.modelo,x.ano].filter(Boolean).join(' ')} <span class="text-emerald-400 float-right">${brl(x.preco_anuncio)}</span>`);
 

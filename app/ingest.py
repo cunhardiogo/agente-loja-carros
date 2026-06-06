@@ -1,3 +1,5 @@
+import hashlib
+import re
 from datetime import timedelta
 
 from . import datas, db, evolution, llm
@@ -79,15 +81,56 @@ def aplicar(ext: Extracao) -> tuple[str | None, str | None]:
         row = db.insert("vendas", {
             "vendedor_id": vend["id"] if vend else None,
             "cliente_nome": ext.cliente_nome,
-            "valor_venda": ext.valor,
-            "forma_pagamento": ext.forma_pagamento,
+            "marca": ext.marca, "modelo": ext.modelo, "versao": ext.versao,
+            "ano": ext.ano, "cor": ext.cor, "km": ext.km, "placa": ext.placa,
+            "em_estoque": ext.em_estoque,
+            "valor_venda": ext.valor, "tabela_preco": ext.tabela_preco, "desconto": ext.desconto,
+            "over_valor": ext.over_valor, "retorno": ext.retorno,
+            "forma_pagamento": ext.forma_pagamento, "banco": ext.banco,
+            "valor_financiado": ext.valor_financiado, "valor_pix": ext.valor_pix,
+            "valor_avista": ext.valor_avista, "debitos": ext.debitos, "valor_total": ext.valor_total,
+            "ipva": ext.ipva, "beneficios": ext.beneficios, "portal_venda": ext.portal_venda,
+            "troca_modelo": ext.troca_modelo, "troca_placa": ext.troca_placa, "troca_valor": ext.troca_valor,
+            "cliente_cpf": ext.cliente_cpf, "cliente_email": ext.cliente_email,
+            "cliente_telefone": ext.cliente_telefone, "cliente_endereco": ext.cliente_endereco,
+            "cliente_cep": ext.cliente_cep,
             "data_venda": ext.data_evento or datas.hoje_iso(),
             "status_pagamento": ext.status_pagamento or "pendente",
             "status_entrega": ext.status_entrega or "pendente",
             "data_entrega_prevista": ext.data_entrega,
-            "observacoes": (ext.veiculo_descricao or "") + ((" | " + ext.resumo) if ext.resumo else ""),
+            "observacoes": ext.obs or ext.veiculo_descricao,
         })
         return "vendas", row.get("id")
+
+    if t == TipoEvento.avaliacao:
+        vend = resolver_pessoa(ext.vendedor_nome, "vendedor")
+        row = db.insert("avaliacoes", {
+            "loja": ext.loja, "modelo": ext.modelo or ext.carro_troca, "combustivel": ext.combustivel,
+            "ano": ext.ano, "km": ext.km, "placa": ext.placa,
+            "ar_condicionado": ext.ar_condicionado, "gelando": ext.gelando, "buzina": ext.buzina,
+            "limpador": ext.limpador, "luz_painel": ext.luz_painel, "chave_reserva": ext.chave_reserva,
+            "revisado": ext.revisado, "revisao": ext.revisao, "pecas_qtd": ext.pecas_qtd,
+            "pecas_obs": ext.pecas_obs, "pneus": ext.pneus, "obs": ext.obs,
+            "fipe": ext.fipe, "valor_avaliacao": ext.valor_avaliacao or ext.valor,
+            "carro_troca": ext.carro_troca, "vendedor_id": vend["id"] if vend else None,
+        })
+        return "avaliacoes", row.get("id")
+
+    if t == TipoEvento.entrega_agendada:
+        vend = resolver_pessoa(ext.vendedor_nome, "vendedor")
+        veic = ext.veiculo_texto or ext.veiculo_descricao or ext.modelo
+        ref = ("ent_" + hashlib.md5(f"{veic}|{ext.data_entrega}".lower().encode()).hexdigest()[:16]) if veic else None
+        registro = {
+            "loja": ext.loja, "data_entrega": ext.data_entrega, "horario": ext.horario,
+            "vendedor_id": vend["id"] if vend else None, "veiculo": veic, "placa": ext.placa,
+            "observacao": ext.observacao or ext.obs, "ref_externa": ref,
+        }
+        existe = db.select("entregas", {"select": "id", "ref_externa": f"eq.{ref}", "limit": "1"}) if ref else []
+        if existe:
+            db.update("entregas", registro, {"id": f"eq.{existe[0]['id']}"})
+            return "entregas", existe[0]["id"]
+        row = db.insert("entregas", registro)
+        return "entregas", row.get("id")
 
     if t == TipoEvento.agendamento:
         sdr = resolver_pessoa(ext.sdr_nome, "sdr")
@@ -103,7 +146,8 @@ def aplicar(ext: Extracao) -> tuple[str | None, str | None]:
 
     if t == TipoEvento.anuncio:
         row = db.insert("veiculos", {
-            "marca": ext.marca, "modelo": ext.modelo, "ano": ext.ano, "cor": ext.cor,
+            "marca": ext.marca, "modelo": ext.modelo, "versao": ext.versao, "ano": ext.ano,
+            "cor": ext.cor, "km": ext.km, "placa": ext.placa,
             "preco_anuncio": ext.valor, "status": "anunciado",
             "data_anuncio": ext.data_evento or datas.hoje_iso(),
             "observacoes": ext.veiculo_descricao or ext.resumo,
@@ -150,8 +194,26 @@ def _pergunta_confirmacao(ext: Extracao) -> str:
             f"Responda: *sim* / *não* / *corrigir ...*")
 
 
+def _split_entregas(texto: str) -> list[str]:
+    """Se a mensagem tem várias entregas (lista), separa em blocos."""
+    if texto.upper().count("ENTREGA") < 2:
+        return [texto]
+    blocos = re.split(r"\n\s*_{3,}\s*\n|(?=🎁)", texto)
+    blocos = [b.strip() for b in blocos if b.strip() and "entrega" in b.lower()]
+    return blocos or [texto]
+
+
 def processar(grupo: dict, message_id: str | None, remetente: str | None,
               remetente_nome: str | None, texto: str, timestamp_msg: str | None) -> dict:
+    blocos = _split_entregas(texto)
+    if len(blocos) > 1:
+        res = [_processar_um(grupo, None, remetente, remetente_nome, b, timestamp_msg) for b in blocos]
+        return {"multiplos": len(res), "itens": res}
+    return _processar_um(grupo, message_id, remetente, remetente_nome, texto, timestamp_msg)
+
+
+def _processar_um(grupo: dict, message_id: str | None, remetente: str | None,
+                  remetente_nome: str | None, texto: str, timestamp_msg: str | None) -> dict:
     vendedores = db.select("vendedores", {"select": "id,nome,apelidos,funcao", "ativo": "eq.true"})
     ext = llm.extrair(texto, grupo["nome"], grupo.get("tipo"), vendedores)
 

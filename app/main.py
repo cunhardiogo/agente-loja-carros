@@ -101,6 +101,8 @@ def _metrics() -> dict:
         "a_entregar": {"quantidade": a_entregar["quantidade"], "itens": a_entregar["itens"]},
         "estoque": consulta.listar_carros("anunciado"),
         "agendamentos": consulta.resumo_agendamentos("mes"),
+        "entregas": consulta.entregas_agendadas("mes"),
+        "avaliacoes": consulta.listar_avaliacoes("mes"),
         "pendentes_confirmacao": len(pendentes),
     }
 

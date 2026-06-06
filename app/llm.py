@@ -10,27 +10,35 @@ from .schemas import Extracao
 _http = httpx.Client(verify=settings.verify_ssl, timeout=60)
 _client = OpenAI(api_key=settings.openai_api_key, http_client=_http) if settings.openai_api_key else None
 
-SYSTEM = """Você é um assistente que lê mensagens de grupos de WhatsApp de uma loja de carros (Grupo SB) \
-e extrai eventos de negócio de forma estruturada. As mensagens são conversa livre, informais.
+SYSTEM = """Você lê mensagens dos grupos de WhatsApp de uma loja de carros (Grupo SB) e extrai \
+eventos de negócio de forma estruturada. As mensagens podem ser conversa livre OU formulários padronizados \
+(com emojis e campos rotulados). Preencha o máximo de campos que a mensagem fornecer.
 
-Eventos possíveis:
-- venda: alguém fechou/vendeu um carro. Capture vendedor, cliente, veículo, valor, forma de pagamento.
-- agendamento: SDR marcou uma visita/test drive. Capture cliente, sdr, vendedor, veículo, data/hora.
-- comparecimento: informa se um cliente agendado compareceu ou faltou. Defina compareceu true/false.
-- anuncio: carro novo colocado à venda/anunciado. Capture marca, modelo, ano, cor, valor.
-- pagamento: informa que uma venda foi paga (status_pagamento).
-- entrega: informa que um carro foi entregue ao cliente (status_entrega).
-- nenhum: bate-papo, bom dia, figurinha, áudio, qualquer coisa sem evento de negócio.
+Tipos de evento:
+- venda: "Resumo de Venda". Capture vendedor, cliente (nome/CPF/email/telefone/endereço/CEP), veículo \
+(marca, modelo, versao, ano, cor, km, placa, em_estoque), datas (data_evento=data da venda, data_entrega), \
+valores (tabela_preco, valor=valor vendido, desconto, over_valor, retorno, valor_total), \
+pagamento (banco, valor_financiado, valor_pix, valor_avista, forma_pagamento), \
+troca (troca_modelo, troca_placa, troca_valor), ipva (cliente/loja), beneficios, portal_venda (ex Webmotors).
+- avaliacao: formulário "Avaliações" de um carro (pra troca/compra). Capture loja, modelo, combustivel, ano, km, placa, \
+checklist (ar_condicionado, gelando, buzina, limpador, luz_painel, chave_reserva, revisado = true/false a partir de (X)Sim/(X)Não), \
+revisao, pecas_qtd, pecas_obs, pneus, obs, fipe, valor_avaliacao, carro_troca (ex 'C4 Lounge 2014').
+- entrega_agendada: item da lista do grupo de ENTREGAS. Capture loja, data_entrega, horario, vendedor, \
+veiculo_texto (ex 'ASX 2015 KPY-6D44'), placa, observacao. Se a mensagem tiver VÁRIAS entregas, extraia só a primeira \
+(o sistema processa uma por vez).
+- anuncio: carro novo entrando no estoque/anunciado (grupo de fotos). Capture marca, modelo, versao, ano, cor, km, valor (preço), placa.
+- pagamento: avisa que uma venda foi paga. Capture cliente_nome (e status_pagamento).
+- entrega: avisa que um carro JÁ foi entregue ao cliente. Capture cliente_nome.
+- comparecimento: avisa se cliente compareceu/faltou. Capture cliente_nome e compareceu (true/false).
+- nenhum: bate-papo, bom dia, figurinha, sem evento de negócio.
 
 Regras:
-- Se a mensagem não contém um evento claro, use tipo_evento="nenhum" e confianca alta.
-- confianca reflete sua certeza (0 a 1). Seja conservador: dúvida = confianca menor.
-- Resolva datas relativas ("hoje", "amanhã", "sexta") para ISO YYYY-MM-DD usando a data de hoje informada.
-- valor sempre em número (reais), sem "R$" nem pontos de milhar.
-- Nomes: use exatamente como aparecem; a resolução com o cadastro é feita depois.
-- Em pagamento, entrega e comparecimento, SEMPRE capture cliente_nome (e o veículo, se houver) para localizar o registro existente.
-- data_entrega = data prevista de entrega, quando mencionada (ex.: "entrega sexta").
-- Em comparecimento, defina compareceu=true se o cliente veio/compareceu, false se faltou/não veio.
+- Sem evento claro → tipo_evento="nenhum", confianca alta.
+- confianca = sua certeza (0 a 1). Dúvida = menor.
+- Datas relativas → ISO YYYY-MM-DD usando a data de hoje. Datas dd/mm/aaaa → ISO.
+- Valores numéricos em reais, sem "R$" nem pontos de milhar (ex 76900). Exceção: valor_pix pode ser texto.
+- Checkboxes "(X) Sim ( ) Não" → true; "( ) Sim (X) Não" → false.
+- Nomes exatamente como aparecem; a resolução com o cadastro é feita depois.
 - Responda SOMENTE com o objeto estruturado."""
 
 
