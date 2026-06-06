@@ -1,0 +1,15 @@
+name: Sync planilha
+
+on:
+  schedule:
+    - cron: "0 */3 * * *"   # a cada 3 horas
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sincronizar agendamentos da planilha
+        run: |
+          curl -m 180 -fsS \
+            "https://agente-loja-carros.onrender.com/cron/sync-planilha?token=${{ secrets.CRON_TOKEN }}"

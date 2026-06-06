@@ -4,7 +4,7 @@ import os
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from . import confirmacao, consulta, datas, db, evolution, ingest, media
+from . import confirmacao, consulta, datas, db, evolution, ingest, media, planilha
 from .config import settings
 
 logging.basicConfig(level=logging.INFO)
@@ -142,10 +142,25 @@ def _resumo_diario_texto() -> str:
     return "\n".join(linhas)
 
 
+@app.api_route("/cron/sync-planilha", methods=["GET", "POST"])
+def cron_sync_planilha(token: str = ""):
+    if not settings.dashboard_token or token != settings.dashboard_token:
+        return JSONResponse({"erro": "não autorizado"}, status_code=401)
+    try:
+        return planilha.sincronizar()
+    except Exception as e:
+        log.exception("erro sync planilha")
+        return JSONResponse({"erro": str(e)}, status_code=500)
+
+
 @app.api_route("/cron/resumo-diario", methods=["GET", "POST"])
 def cron_resumo(token: str = ""):
     if not settings.dashboard_token or token != settings.dashboard_token:
         return JSONResponse({"erro": "não autorizado"}, status_code=401)
+    try:
+        planilha.sincronizar()  # garante planilha fresca antes do fechamento
+    except Exception:
+        log.exception("erro sync planilha no resumo")
     texto = _resumo_diario_texto()
     evolution.notificar_dono(texto)
     return {"enviado": True, "resumo": texto}

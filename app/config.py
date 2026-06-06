@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     confianca_minima: float = 0.8
     verify_ssl: bool = True
     dashboard_token: str = ""
+    planilha_csv_url: str = ("https://docs.google.com/spreadsheets/d/"
+                             "1_lxkBFmqyI1JAKWVrdvZHvFoqSoaqsijjIq-WKdy5Ec/export?format=csv")
 
 
 settings = Settings()
