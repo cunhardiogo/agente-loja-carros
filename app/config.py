@@ -25,8 +25,7 @@ class Settings(BaseSettings):
     dashboard_token: str = ""
     # agendamentos vêm da planilha (fonte única); grupos não criam agendamento
     agendamento_via_grupo: bool = False
-    planilha_csv_url: str = ("https://docs.google.com/spreadsheets/d/"
-                             "1_lxkBFmqyI1JAKWVrdvZHvFoqSoaqsijjIq-WKdy5Ec/export?format=csv")
+    planilha_sheet_id: str = "1_lxkBFmqyI1JAKWVrdvZHvFoqSoaqsijjIq-WKdy5Ec"
 
 
 settings = Settings()

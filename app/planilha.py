@@ -1,92 +1,151 @@
-import csv
 import hashlib
 import io
 import logging
-from datetime import datetime
+import re
+import unicodedata
+from datetime import date, datetime, time
 
 import httpx
+import openpyxl
 
 from . import db
 from .config import settings
-from .ingest import resolver_pessoa
 
 log = logging.getLogger("agente")
 
-# Status da planilha -> compareceu
+# abas de mês de 2026 (Abril26, Maio26, ... Dezembro26)
+_ABA_MES = re.compile(r"26\s*$")
+
 _STATUS_COMPARECEU = {
     "REALIZADO": True, "VENDIDO": True, "COMPARECEU": True, "FINALIZADO": True,
-    "CANCELADO": False, "NAO COMPARECEU": False, "NÃO COMPARECEU": False, "FALTOU": False,
+    "CANCELADO": False, "NAO COMPARECEU": False, "FALTOU": False,
     "AGENDADO": None, "REMARCADO": None,
 }
 
+_HEADER_MAP = {
+    "cliente": "cliente", "vendedor": "vendedor", "data": "data",
+    "horario": "hora", "status agendamento": "status", "status": "status",
+    "veiculo": "veiculo", "canal de venda": "canal",
+}
 
-def _parse_data(data_str: str, hora_str: str) -> str | None:
-    data_str = (data_str or "").strip()
-    if not data_str:
-        return None
+
+def _norm(s) -> str:
+    s = str(s or "").strip().lower()
+    return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
+
+
+def _parse_dt(dv, hv) -> str | None:
     d = None
-    for fmt in ("%d/%m/%Y", "%d/%m/%y"):
-        try:
-            d = datetime.strptime(data_str, fmt)
-            break
-        except ValueError:
-            continue
+    if isinstance(dv, datetime):
+        d = dv
+    elif isinstance(dv, date):
+        d = datetime(dv.year, dv.month, dv.day)
+    elif isinstance(dv, str) and dv.strip():
+        for f in ("%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d"):
+            try:
+                d = datetime.strptime(dv.strip(), f)
+                break
+            except ValueError:
+                continue
     if d is None:
         return None
-    try:
-        h = datetime.strptime((hora_str or "").strip(), "%H:%M")
-        d = d.replace(hour=h.hour, minute=h.minute)
-    except ValueError:
-        pass
+    if isinstance(hv, time):
+        d = d.replace(hour=hv.hour, minute=hv.minute)
+    elif isinstance(hv, str):
+        try:
+            t = datetime.strptime(hv.strip(), "%H:%M")
+            d = d.replace(hour=t.hour, minute=t.minute)
+        except ValueError:
+            pass
     return d.isoformat()
 
 
-def _ref(cliente: str, data_str: str, vendedor: str) -> str:
-    base = f"{cliente}|{data_str}|{vendedor}".strip().lower()
+def _colmap(linha) -> dict:
+    cols: dict[str, int] = {}
+    for i, cel in enumerate(linha):
+        chave = _HEADER_MAP.get(_norm(cel))
+        if chave and chave not in cols:
+            cols[chave] = i
+    return cols
+
+
+def _ref(aba: str, cliente: str, data_str: str, vendedor: str) -> str:
+    base = f"{aba}|{cliente}|{data_str}|{vendedor}".strip().lower()
     return "plan_" + hashlib.md5(base.encode()).hexdigest()[:16]
 
 
 def sincronizar() -> dict:
-    r = httpx.get(settings.planilha_csv_url, timeout=60, verify=settings.verify_ssl, follow_redirects=True)
+    url = f"https://docs.google.com/spreadsheets/d/{settings.planilha_sheet_id}/export?format=xlsx"
+    r = httpx.get(url, timeout=90, verify=settings.verify_ssl, follow_redirects=True)
     r.raise_for_status()
-    if "text/csv" not in (r.headers.get("content-type") or ""):
-        raise RuntimeError("Planilha não retornou CSV — verifique se está compartilhada por link (Leitor).")
+    wb = openpyxl.load_workbook(io.BytesIO(r.content), read_only=True, data_only=True)
 
-    rows = list(csv.reader(io.StringIO(r.text)))
-    novos = atualizados = ignorados = 0
+    registros: list[dict] = []
+    vistos: set[str] = set()
+    abas = [n for n in wb.sheetnames if _ABA_MES.search(n)]
 
-    for row in rows[1:]:
-        if len(row) < 6:
-            ignorados += 1
-            continue
-        cliente = (row[1] or "").strip()
-        vendedor_nome = (row[2] or "").strip()
-        data_str = (row[3] or "").strip()
-        hora_str = (row[4] or "").strip()
-        status = (row[5] or "").strip()
-        veiculo = (row[6].strip() if len(row) > 6 else "")
-        canal = (row[7].strip() if len(row) > 7 else "")
+    # cache de vendedores (resolução em memória, sem ir ao banco por linha)
+    vendedores = [v for v in db.select("vendedores", {"select": "id,nome,apelidos,funcao", "ativo": "eq.true"})
+                  if v["funcao"] == "vendedor"]
 
-        if not cliente or not data_str:
-            ignorados += 1
-            continue
+    def resolver(nome: str):
+        n = _norm(nome)
+        if not n:
+            return None
+        for v in vendedores:
+            if _norm(v["nome"]) == n or n in [_norm(a) for a in (v.get("apelidos") or [])]:
+                return v
+        for v in vendedores:
+            if n in _norm(v["nome"]) or _norm(v["nome"]) in n:
+                return v
+        return None
 
-        ref = _ref(cliente, data_str, vendedor_nome)
-        vend = resolver_pessoa(vendedor_nome, "vendedor")
-        registro = {
-            "cliente_nome": cliente,
-            "vendedor_id": vend["id"] if vend else None,
-            "data_agendada": _parse_data(data_str, hora_str),
-            "compareceu": _STATUS_COMPARECEU.get(status.upper()),
-            "origem": "planilha",
-            "ref_externa": ref,
-            "observacoes": " · ".join([p for p in (status, veiculo, canal) if p]),
-        }
-        if db.select("agendamentos", {"select": "id", "ref_externa": f"eq.{ref}", "limit": "1"}):
-            db.update("agendamentos", registro, {"ref_externa": f"eq.{ref}"})
-            atualizados += 1
-        else:
-            db.insert("agendamentos", registro)
-            novos += 1
+    for aba in abas:
+        ws = wb[aba]
+        cols = None
+        vazios = 0
+        for linha in ws.iter_rows(values_only=True):
+            if cols is None:
+                if any(_norm(c) == "cliente" for c in linha):
+                    cols = _colmap(linha)
+                continue
+            if "cliente" not in cols or "data" not in cols:
+                break
 
-    return {"novos": novos, "atualizados": atualizados, "ignorados": ignorados, "linhas": len(rows) - 1}
+            def val(k):
+                i = cols.get(k)
+                return linha[i] if i is not None and i < len(linha) else None
+
+            cliente = str(val("cliente") or "").strip()
+            data_raw = val("data")
+            if not cliente or data_raw in (None, ""):
+                vazios += 1
+                if vazios > 30:  # fim dos dados da aba
+                    break
+                continue
+            vazios = 0
+
+            vendedor_nome = str(val("vendedor") or "").strip()
+            status = str(val("status") or "").strip()
+            veiculo = str(val("veiculo") or "").strip()
+            canal = str(val("canal") or "").strip()
+            data_iso = _parse_dt(data_raw, val("hora"))
+            data_chave = data_iso[:10] if data_iso else str(data_raw)
+
+            ref = _ref(aba, cliente, data_chave, vendedor_nome)
+            if ref in vistos:  # evita ref duplicado no mesmo lote
+                continue
+            vistos.add(ref)
+            vend = resolver(vendedor_nome)
+            registros.append({
+                "cliente_nome": cliente,
+                "vendedor_id": vend["id"] if vend else None,
+                "data_agendada": data_iso,
+                "compareceu": _STATUS_COMPARECEU.get(status.upper()),
+                "origem": "planilha",
+                "ref_externa": ref,
+                "observacoes": " · ".join([p for p in (aba, status, veiculo, canal) if p]),
+            })
+
+    db.upsert("agendamentos", registros, "ref_externa")
+    return {"abas": abas, "sincronizados": len(registros)}

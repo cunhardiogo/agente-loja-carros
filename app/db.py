@@ -28,3 +28,13 @@ def update(table: str, data: dict, params: dict) -> list[dict]:
     r = _client.patch(f"/{table}", json=data, params=params, headers={"Prefer": "return=representation"})
     r.raise_for_status()
     return r.json()
+
+
+def upsert(table: str, rows: list[dict], on_conflict: str) -> int:
+    """Insere/atualiza em lote numa requisição (ON CONFLICT pela coluna on_conflict)."""
+    if not rows:
+        return 0
+    r = _client.post(f"/{table}", params={"on_conflict": on_conflict}, json=rows,
+                     headers={"Prefer": "resolution=merge-duplicates,return=minimal"})
+    r.raise_for_status()
+    return len(rows)
