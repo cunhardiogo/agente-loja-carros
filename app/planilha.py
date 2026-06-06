@@ -148,4 +148,12 @@ def sincronizar() -> dict:
             })
 
     db.upsert("agendamentos", registros, "ref_externa")
-    return {"abas": abas, "sincronizados": len(registros)}
+
+    # espelha exclusões/edições: remove da base os da planilha que não estão mais nela
+    existentes = db.select("agendamentos", {"select": "ref_externa", "origem": "eq.planilha"})
+    remover = [e["ref_externa"] for e in existentes if e["ref_externa"] and e["ref_externa"] not in vistos]
+    for i in range(0, len(remover), 100):
+        lote = remover[i:i + 100]
+        db.delete("agendamentos", {"origem": "eq.planilha", "ref_externa": f"in.({','.join(lote)})"})
+
+    return {"abas": abas, "sincronizados": len(registros), "removidos": len(remover)}

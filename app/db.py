@@ -30,6 +30,11 @@ def update(table: str, data: dict, params: dict) -> list[dict]:
     return r.json()
 
 
+def delete(table: str, params: dict) -> None:
+    r = _client.delete(f"/{table}", params=params)
+    r.raise_for_status()
+
+
 def upsert(table: str, rows: list[dict], on_conflict: str) -> int:
     """Insere/atualiza em lote numa requisição (ON CONFLICT pela coluna on_conflict)."""
     if not rows:
