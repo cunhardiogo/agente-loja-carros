@@ -252,6 +252,8 @@ Use SEMPRE as ferramentas para buscar dados reais — nunca invente números.
 IMPORTANTE: para CONTAR quantos carros foram vendidos use a ferramenta 'vendidos' (fonte oficial = planilha). \
 Para FATURAMENTO/valores/ticket use 'resumo_vendas'. Se perguntarem "quantos vendemos e quanto faturamos", \
 chame as DUAS e combine (ex.: "6 vendidos, R$ X faturados").
+SEMPRE que falar de vendas/faturamento/financeiro, informe OBRIGATORIAMENTE os DOIS números juntos: \
+o FATURAMENTO TOTAL (resumo_vendas) e o total A RECEBER (pendencias tipo=pagamento). Nunca dê só um deles.
 Responda curto e direto, em português, formatando valores em reais como R$ 95.000.
 Para rankings/listas, use linhas curtas com emojis discretos. Se não houver dados, diga que não encontrou nada no período.
 Quando o usuário não especificar o período, assuma o mês atual."""
