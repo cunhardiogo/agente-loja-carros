@@ -76,11 +76,15 @@ async def webhook(request: Request):
 
 def _consulta(pergunta: str, numero: str):
     try:
-        # primeiro tenta resolver uma confirmação pendente (sim/não/corrigir); senão, responde a pergunta
-        resposta = confirmacao.tentar_resolver(pergunta) or consulta.responder(pergunta)
+        resposta = confirmacao.tentar_resolver(pergunta)
+        if resposta is None:
+            historico = consulta.carregar_historico(numero)
+            resposta = consulta.responder(pergunta, historico)
     except Exception:
         log.exception("erro na consulta")
         resposta = "Tive um problema ao consultar agora. Pode tentar de novo?"
+    consulta.salvar_conversa(numero, "user", pergunta)
+    consulta.salvar_conversa(numero, "assistant", resposta)
     try:
         evolution.enviar_texto(numero, resposta)
     except Exception:

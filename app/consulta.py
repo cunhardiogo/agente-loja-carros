@@ -29,6 +29,27 @@ def _range(periodo: str | None):
     return None, None  # tudo
 
 
+def _resolve(periodo, data_inicio=None, data_fim=None):
+    """Usa datas explícitas (ISO) se vierem; senão cai no período nomeado."""
+    if data_inicio or data_fim:
+        return (data_inicio or "1900-01-01"), (data_fim or "2999-12-31")
+    return _range(periodo)
+
+
+def _num(txt) -> float:
+    """Extrai o primeiro número de um texto tipo 'R$ 2.000' ou '5'."""
+    import re
+    if txt is None:
+        return 0.0
+    m = re.findall(r"\d[\d.]*", str(txt).replace(",", "."))
+    if not m:
+        return 0.0
+    try:
+        return float(m[0].replace(".", "")) if len(m[0].replace(".", "")) > 0 else 0.0
+    except ValueError:
+        return 0.0
+
+
 def _dentro(valor_data: str | None, ini: str | None, fim: str | None) -> bool:
     if ini is None:
         return True
@@ -45,27 +66,29 @@ def _nome_vendedor(vid, cache):
 
 
 # ===== ferramentas de consulta =====
-def resumo_vendas(periodo: str = "mes", vendedor: str | None = None) -> dict:
-    ini, fim = _range(periodo)
+def resumo_vendas(periodo: str = "mes", vendedor: str | None = None,
+                  data_inicio: str | None = None, data_fim: str | None = None) -> dict:
+    ini, fim = _resolve(periodo, data_inicio, data_fim)
     vid = None
     if vendedor:
         v = resolver_pessoa(vendedor, "vendedor")
         vid = v["id"] if v else None
         if vendedor and not vid:
             return {"erro": f"Vendedor '{vendedor}' não encontrado no cadastro."}
-    rows = db.select("vendas", {"select": "valor_venda,data_venda,vendedor_id"})
+    rows = db.select("vendas", {"select": "valor_venda,data_venda,vendedor_id,over_valor"})
     rows = [r for r in rows if _dentro(r.get("data_venda"), ini, fim) and (not vid or r.get("vendedor_id") == vid)]
     total = sum((r.get("valor_venda") or 0) for r in rows)
+    over = sum(_num(r.get("over_valor")) for r in rows)
     n = len(rows)
     return {
         "periodo": periodo, "vendedor": vendedor or "todos",
-        "quantidade": n, "valor_total": total,
+        "quantidade": n, "valor_total": total, "over_total": over,
         "ticket_medio": round(total / n, 2) if n else 0,
     }
 
 
-def ranking_vendedores(periodo: str = "mes") -> dict:
-    ini, fim = _range(periodo)
+def ranking_vendedores(periodo: str = "mes", data_inicio: str | None = None, data_fim: str | None = None) -> dict:
+    ini, fim = _resolve(periodo, data_inicio, data_fim)
     nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
     rows = db.select("vendas", {"select": "valor_venda,data_venda,vendedor_id"})
     rows = [r for r in rows if _dentro(r.get("data_venda"), ini, fim)]
@@ -122,8 +145,9 @@ def pendencias(tipo: str) -> dict:
     return {"tipo": "entrega", "quantidade": len(rows), "itens": rows}
 
 
-def resumo_agendamentos(periodo: str = "semana", compareceu: bool | None = None) -> dict:
-    ini, fim = _range(periodo)
+def resumo_agendamentos(periodo: str = "semana", compareceu: bool | None = None,
+                        data_inicio: str | None = None, data_fim: str | None = None) -> dict:
+    ini, fim = _resolve(periodo, data_inicio, data_fim)
     rows = db.select("agendamentos", {"select": "cliente_nome,data_agendada,compareceu"})
     rows = [r for r in rows if _dentro(r.get("data_agendada"), ini, fim)]
     total = len(rows)
@@ -177,9 +201,9 @@ def listar_agendamentos(periodo: str = "hoje") -> dict:
     return {"periodo": periodo, "quantidade": len(itens), "agendamentos": itens}
 
 
-def vendidos(periodo: str = "mes") -> dict:
+def vendidos(periodo: str = "mes", data_inicio: str | None = None, data_fim: str | None = None) -> dict:
     """Quantos carros VENDIDOS no período, segundo a planilha (Status=VENDIDO)."""
-    ini, fim = _range(periodo)
+    ini, fim = _resolve(periodo, data_inicio, data_fim)
     rows = db.select("agendamentos", {"select": "cliente_nome,data_agendada,resultado,observacoes",
                                       "origem": "eq.planilha"})
     rows = [r for r in rows if (r.get("resultado") or "").strip().lower() == "vendido"
@@ -292,10 +316,66 @@ def marcar_anunciado(veiculo: str) -> dict:
     return {"ok": True, "anunciado": f"{r.get('marca','')} {r.get('modelo','')}".strip()}
 
 
+def vendas_por_canal(periodo: str = "mes", data_inicio: str | None = None, data_fim: str | None = None) -> dict:
+    ini, fim = _resolve(periodo, data_inicio, data_fim)
+    rows = [r for r in db.select("vendas", {"select": "portal_venda,valor_venda,data_venda"})
+            if _dentro(r.get("data_venda"), ini, fim)]
+    agg: dict = {}
+    for r in rows:
+        canal = (r.get("portal_venda") or "—").strip() or "—"
+        a = agg.setdefault(canal, {"canal": canal, "quantidade": 0, "valor_total": 0})
+        a["quantidade"] += 1
+        a["valor_total"] += r.get("valor_venda") or 0
+    return {"periodo": periodo, "canais": sorted(agg.values(), key=lambda x: x["valor_total"], reverse=True)}
+
+
+def margem_avaliacoes(periodo: str = "mes", data_inicio: str | None = None, data_fim: str | None = None) -> dict:
+    ini, fim = _resolve(periodo, data_inicio, data_fim)
+    rows = [r for r in db.select("avaliacoes", {"select": "modelo,fipe,valor_avaliacao,valor_pretendido,created_at"})
+            if _dentro(r.get("created_at"), ini, fim)]
+    itens, difs = [], []
+    for r in rows:
+        fipe, aval, pret = r.get("fipe"), r.get("valor_avaliacao"), r.get("valor_pretendido")
+        abaixo = (fipe - aval) if (fipe and aval) else None
+        if abaixo is not None:
+            difs.append(abaixo)
+        itens.append({"modelo": r.get("modelo"), "fipe": fipe, "avaliado": aval,
+                      "cliente_pediu": pret, "abaixo_da_fipe": abaixo})
+    return {"periodo": periodo, "quantidade": len(itens),
+            "media_abaixo_da_fipe": round(sum(difs) / len(difs)) if difs else 0, "itens": itens}
+
+
+def conversao(periodo: str = "mes", data_inicio: str | None = None, data_fim: str | None = None) -> dict:
+    """Taxa de conversão: dos agendamentos da planilha no período, quantos viraram VENDIDO."""
+    ini, fim = _resolve(periodo, data_inicio, data_fim)
+    rows = [r for r in db.select("agendamentos", {"select": "resultado,data_agendada", "origem": "eq.planilha"})
+            if _dentro(r.get("data_agendada"), ini, fim)]
+    total = len(rows)
+    vendidos_n = sum(1 for r in rows if (r.get("resultado") or "").strip().lower() == "vendido")
+    return {"periodo": periodo, "agendamentos": total, "vendidos": vendidos_n,
+            "taxa_conversao": round(vendidos_n / total * 100, 1) if total else 0}
+
+
+def historico_cliente(nome: str) -> dict:
+    n = (nome or "").strip()
+    if not n:
+        return {"erro": "diga o nome do cliente"}
+    ag = db.select("agendamentos", {"select": "cliente_nome,data_agendada,resultado,observacoes",
+                                    "cliente_nome": f"ilike.*{n}*", "origem": "eq.planilha"})
+    vd = db.select("vendas", {"select": "cliente_nome,modelo,versao,valor_venda,data_venda,"
+                              "status_entrega,status_pagamento,portal_venda", "cliente_nome": f"ilike.*{n}*"})
+    return {"cliente": n, "agendamentos": ag, "vendas": vd,
+            "encontrou": bool(ag or vd)}
+
+
 DISPATCH = {
     "vendidos": vendidos,
     "reservados": reservados,
     "listar_agendamentos": listar_agendamentos,
+    "vendas_por_canal": vendas_por_canal,
+    "margem_avaliacoes": margem_avaliacoes,
+    "conversao": conversao,
+    "historico_cliente": historico_cliente,
     "marcar_entregue": marcar_entregue,
     "marcar_pago": marcar_pago,
     "marcar_anunciado": marcar_anunciado,
@@ -309,12 +389,14 @@ DISPATCH = {
 }
 
 _PERIODO = {"type": "string", "enum": ["hoje", "ontem", "semana", "mes", "tudo"]}
+_DI = {"type": "string", "description": "Data início ISO YYYY-MM-DD (opcional, p/ período livre como 'maio' ou 'semana passada')"}
+_DF = {"type": "string", "description": "Data fim ISO YYYY-MM-DD (opcional)"}
 
 TOOLS = [
     {"type": "function", "function": {
         "name": "vendidos",
         "description": "Quantos carros foram VENDIDOS no período (contagem confiável da planilha).",
-        "parameters": {"type": "object", "properties": {"periodo": _PERIODO}},
+        "parameters": {"type": "object", "properties": {"periodo": _PERIODO, "data_inicio": _DI, "data_fim": _DF}},
     }},
     {"type": "function", "function": {
         "name": "reservados",
@@ -340,20 +422,41 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "resumo_vendas",
-        "description": "Total de vendas, valor somado e ticket médio num período. Pode filtrar por um vendedor.",
+        "description": "Faturamento, qtd, ticket médio e over total num período. Pode filtrar por vendedor.",
         "parameters": {"type": "object", "properties": {
-            "periodo": _PERIODO, "vendedor": {"type": "string", "description": "Nome do vendedor (opcional)"}}},
+            "periodo": _PERIODO, "vendedor": {"type": "string", "description": "Nome do vendedor (opcional)"},
+            "data_inicio": _DI, "data_fim": _DF}},
     }},
     {"type": "function", "function": {
         "name": "ranking_vendedores",
-        "description": "Ranking dos vendedores por valor vendido num período (quantas vendas e quanto cada um).",
-        "parameters": {"type": "object", "properties": {"periodo": _PERIODO}},
+        "description": "Ranking dos vendedores por valor vendido num período.",
+        "parameters": {"type": "object", "properties": {"periodo": _PERIODO, "data_inicio": _DI, "data_fim": _DF}},
+    }},
+    {"type": "function", "function": {
+        "name": "vendas_por_canal",
+        "description": "Vendas agrupadas por canal/portal (Webmotors, OLX, Instagram, Indicação...). Qual canal vende mais.",
+        "parameters": {"type": "object", "properties": {"periodo": _PERIODO, "data_inicio": _DI, "data_fim": _DF}},
+    }},
+    {"type": "function", "function": {
+        "name": "margem_avaliacoes",
+        "description": "Avaliações no período: FIPE x valor avaliado x valor que o cliente pediu, e média de quanto abaixo da FIPE compramos.",
+        "parameters": {"type": "object", "properties": {"periodo": _PERIODO, "data_inicio": _DI, "data_fim": _DF}},
+    }},
+    {"type": "function", "function": {
+        "name": "conversao",
+        "description": "Taxa de conversão: dos agendamentos no período, quantos viraram venda (%).",
+        "parameters": {"type": "object", "properties": {"periodo": _PERIODO, "data_inicio": _DI, "data_fim": _DF}},
+    }},
+    {"type": "function", "function": {
+        "name": "historico_cliente",
+        "description": "Histórico de um cliente: agendamentos (com resultado) e vendas dele. Use p/ 'histórico do cliente X'.",
+        "parameters": {"type": "object", "properties": {"nome": {"type": "string"}}, "required": ["nome"]},
     }},
     {"type": "function", "function": {
         "name": "listar_carros",
-        "description": "Lista carros do estoque por status, com preços.",
+        "description": "Lista carros do estoque por status, com preços. Use 'a_anunciar' p/ os que faltam anunciar.",
         "parameters": {"type": "object", "properties": {
-            "status": {"type": "string", "enum": ["anunciado", "reservado", "vendido", "entregue"]}}},
+            "status": {"type": "string", "enum": ["a_anunciar", "anunciado", "reservado", "vendido", "entregue"]}}},
     }},
     {"type": "function", "function": {
         "name": "pendencias",
@@ -365,7 +468,7 @@ TOOLS = [
         "name": "resumo_agendamentos",
         "description": "RESUMO de agendamentos num período: total e taxa de comparecimento (quantos vieram/faltaram).",
         "parameters": {"type": "object", "properties": {
-            "periodo": _PERIODO, "compareceu": {"type": "boolean"}}},
+            "periodo": _PERIODO, "compareceu": {"type": "boolean"}, "data_inicio": _DI, "data_fim": _DF}},
     }},
     {"type": "function", "function": {
         "name": "listar_agendamentos",
@@ -387,23 +490,48 @@ TOOLS = [
 
 SYSTEM = """Você é o assistente da Loja SB (revenda de carros) respondendo o DONO no WhatsApp.
 Use SEMPRE as ferramentas para buscar dados reais — nunca invente números.
-IMPORTANTE: para CONTAR quantos carros foram vendidos use a ferramenta 'vendidos' (fonte oficial = planilha). \
-Para FATURAMENTO/valores/ticket use 'resumo_vendas'. Se perguntarem "quantos vendemos e quanto faturamos", \
-chame as DUAS e combine (ex.: "6 vendidos, R$ X faturados").
-SEMPRE que falar de vendas/faturamento/financeiro, informe OBRIGATORIAMENTE os DOIS números juntos: \
-o FATURAMENTO TOTAL (resumo_vendas) e o total A RECEBER (pendencias tipo=pagamento). Nunca dê só um deles.
-Você também EXECUTA ações quando o dono pedir: marcar_entregue (entreguei o carro do X), marcar_pago (recebi/quitou a venda do X), \
-marcar_anunciado (anunciei/publiquei o carro Y). Use a ferramenta certa e confirme em 1 linha o que foi feito \
-(ou diga que não encontrou). Não invente que fez se a ferramenta retornar erro.
-Responda curto e direto, em português, formatando valores em reais como R$ 95.000.
-Para rankings/listas, use linhas curtas com emojis discretos. Se não houver dados, diga que não encontrou nada no período.
-Quando o usuário não especificar o período, assuma o mês atual."""
+
+CONTAGEM x VALOR: para CONTAR vendidos use 'vendidos' (fonte oficial = planilha). Para FATURAMENTO/ticket/over use 'resumo_vendas'.
+SEMPRE que falar de vendas/faturamento/financeiro, informe os DOIS juntos: FATURAMENTO (resumo_vendas) E A RECEBER (pendencias pagamento).
+
+PERÍODOS: quando o usuário não disser, assuma o mês atual. Para períodos livres ("semana passada", "dia 5", "em maio", "últimos 7 dias"), \
+calcule data_inicio/data_fim em ISO a partir da DATA DE HOJE informada e passe nas ferramentas que aceitam (vendidos, resumo_vendas, ranking_vendedores, vendas_por_canal, margem_avaliacoes, conversao, resumo_agendamentos).
+
+ANÁLISES: você tem vendas_por_canal (qual portal vende mais), margem_avaliacoes (FIPE x avaliado), conversao (agendou→vendeu %), historico_cliente (jornada de um cliente).
+
+AÇÕES quando o dono pedir: marcar_entregue, marcar_pago, marcar_anunciado. Confirme em 1 linha o que fez (ou que não encontrou). Nunca invente que fez se a ferramenta der erro.
+
+ESTILO: curto e direto, em português, valores como R$ 95.000, listas em linhas curtas com emojis discretos. \
+Quando fizer sentido, acrescente UM insight curto (ex.: quem está puxando o mês, alerta de comparecimento/entrega atrasada) — sem encher. \
+Use o histórico da conversa para entender perguntas curtas de continuação ("e do Carlos?", "e esse mês?")."""
 
 
-def responder(pergunta: str) -> str:
+def _system_dinamico() -> str:
+    h = datas.agora()
+    dias = ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"]
+    return SYSTEM + f"\n\nDATA DE HOJE: {h.strftime('%Y-%m-%d')} ({dias[h.weekday()]})."
+
+
+def carregar_historico(numero: str, limite: int = 6) -> list:
+    rows = db.select("conversas", {"select": "papel,conteudo", "numero": f"eq.{numero}",
+                                   "order": "created_at.desc", "limit": str(limite)})
+    rows.reverse()
+    return [{"role": r["papel"], "content": r["conteudo"]} for r in rows]
+
+
+def salvar_conversa(numero: str, papel: str, conteudo: str) -> None:
+    try:
+        db.insert("conversas", {"numero": numero, "papel": papel, "conteudo": conteudo})
+    except Exception:
+        pass
+
+
+def responder(pergunta: str, historico: list | None = None) -> str:
     if _client is None:
         return "IA não configurada (falta OPENAI_API_KEY)."
-    messages = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": pergunta}]
+    messages = [{"role": "system", "content": _system_dinamico()}]
+    messages += historico or []
+    messages.append({"role": "user", "content": pergunta})
     for _ in range(5):
         resp = _client.chat.completions.create(
             model=settings.openai_model_consulta, messages=messages, tools=TOOLS,

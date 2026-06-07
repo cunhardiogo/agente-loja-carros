@@ -11,6 +11,27 @@ def _norm(s: str | None) -> str:
     return (s or "").strip().lower()
 
 
+_PIX_PENDENTE = ("deposit", "restante", "devolv", "a receber", "falta")
+
+
+def parse_pix(texto: str | None) -> float:
+    """Soma o que JÁ foi pago no campo Pix (ignora parcelas marcadas como pendentes)."""
+    if not texto:
+        return 0.0
+    total = 0.0
+    for seg in str(texto).split("+"):
+        if any(p in seg.lower() for p in _PIX_PENDENTE):
+            continue
+        m = re.search(r"[\d.,]+", seg)
+        if not m:
+            continue
+        try:
+            total += float(m.group().replace(".", "").replace(",", "."))
+        except ValueError:
+            pass
+    return total
+
+
 def grupo_por_jid(jid: str) -> dict | None:
     rows = db.select("grupos", {"jid": f"eq.{jid}", "ativo": "eq.true", "limit": "1"})
     return rows[0] if rows else None
@@ -87,7 +108,7 @@ def aplicar(ext: Extracao) -> tuple[str | None, str | None]:
             "valor_venda": ext.valor, "tabela_preco": ext.tabela_preco, "desconto": ext.desconto,
             "over_valor": ext.over_valor, "retorno": ext.retorno,
             "forma_pagamento": ext.forma_pagamento, "banco": ext.banco,
-            "valor_entrada": ext.valor_entrada,
+            "valor_entrada": (parse_pix(ext.valor_pix) or ext.valor_entrada),
             "valor_financiado": ext.valor_financiado, "valor_pix": ext.valor_pix,
             "valor_avista": ext.valor_avista, "debitos": ext.debitos, "valor_total": ext.valor_total,
             "ipva": ext.ipva, "beneficios": ext.beneficios, "portal_venda": ext.portal_venda,
