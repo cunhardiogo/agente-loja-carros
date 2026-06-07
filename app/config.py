@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     evolution_assist_apikey: str = ""
 
     meu_numero: str = ""
+    # números extras que recebem os relatórios (separados por vírgula)
+    numeros_relatorio: str = "5521994110597"
     confianca_minima: float = 0.8
     verify_ssl: bool = True
     dashboard_token: str = ""

@@ -269,7 +269,7 @@ def cron_semanal(token: str = ""):
     except Exception:
         log.exception("erro sync planilha no semanal")
     texto = _resumo_semanal_texto()
-    evolution.notificar_dono(texto)
+    evolution.enviar_relatorio(texto)
     return {"enviado": True, "resumo": texto}
 
 
@@ -282,7 +282,7 @@ def cron_agenda(token: str = ""):
     except Exception:
         log.exception("erro sync planilha na agenda")
     texto = _agenda_manha_texto()
-    evolution.notificar_dono(texto)
+    evolution.enviar_relatorio(texto)
     return {"enviado": True, "agenda": texto}
 
 
@@ -295,5 +295,5 @@ def cron_resumo(token: str = ""):
     except Exception:
         log.exception("erro sync planilha no resumo")
     texto = _resumo_diario_texto()
-    evolution.notificar_dono(texto)
+    evolution.enviar_relatorio(texto)
     return {"enviado": True, "resumo": texto}

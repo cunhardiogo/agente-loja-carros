@@ -48,3 +48,16 @@ def notificar_dono(texto: str) -> None:
             enviar_texto(settings.meu_numero, texto)
         except Exception:
             pass
+
+
+def _destinatarios() -> list[str]:
+    nums = [settings.meu_numero] + [n.strip() for n in (settings.numeros_relatorio or "").split(",")]
+    return [n for n in dict.fromkeys(nums) if n]  # remove vazios e duplicados
+
+
+def enviar_relatorio(texto: str) -> None:
+    for numero in _destinatarios():
+        try:
+            enviar_texto(numero, texto)
+        except Exception:
+            pass
