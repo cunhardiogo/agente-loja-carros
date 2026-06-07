@@ -106,13 +106,14 @@ def aplicar(ext: Extracao) -> tuple[str | None, str | None]:
     if t == TipoEvento.avaliacao:
         vend = resolver_pessoa(ext.vendedor_nome, "vendedor")
         row = db.insert("avaliacoes", {
-            "loja": ext.loja, "modelo": ext.modelo or ext.carro_troca, "combustivel": ext.combustivel,
-            "ano": ext.ano, "km": ext.km, "placa": ext.placa,
+            "loja": ext.loja, "modelo": ext.modelo or ext.carro_troca, "versao": ext.versao,
+            "combustivel": ext.combustivel, "ano": ext.ano, "km": ext.km, "placa": ext.placa,
             "ar_condicionado": ext.ar_condicionado, "gelando": ext.gelando, "buzina": ext.buzina,
             "limpador": ext.limpador, "luz_painel": ext.luz_painel, "chave_reserva": ext.chave_reserva,
             "revisado": ext.revisado, "revisao": ext.revisao, "pecas_qtd": ext.pecas_qtd,
             "pecas_obs": ext.pecas_obs, "pneus": ext.pneus, "obs": ext.obs,
             "fipe": ext.fipe, "valor_avaliacao": ext.valor_avaliacao or ext.valor,
+            "valor_pretendido": ext.valor_pretendido,
             "carro_troca": ext.carro_troca, "carro_interesse": ext.carro_interesse,
             "vendedor_id": vend["id"] if vend else None,
         })

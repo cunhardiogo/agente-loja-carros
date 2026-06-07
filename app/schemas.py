@@ -81,7 +81,8 @@ class Extracao(BaseModel):
     # avaliação (formulário de avaliação de carro pra troca/compra)
     loja: str | None = None
     fipe: float | None = None
-    valor_avaliacao: float | None = None
+    valor_avaliacao: float | None = Field(None, description="Valor que a loja avaliou o carro do cliente")
+    valor_pretendido: float | None = Field(None, description="Valor que o cliente pensa/pede pelo carro dele, se mencionado")
     carro_troca: str | None = Field(None, description="Carro avaliado/da troca, ex 'C4 Lounge 2014'")
     carro_interesse: str | None = Field(None, description="Na avaliação, o carro que o cliente quer na troca (campo 'Troca:'), ex 'kicks 2017'")
     ar_condicionado: bool | None = None

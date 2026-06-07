@@ -90,9 +90,23 @@
     </div>
   </section>
 
-  <section class="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
+  <section class="bg-slate-800/60 rounded-xl p-4 border border-slate-700 mb-6">
     <h2 class="font-semibold mb-3">🏷️ Estoque anunciado (<span id="estoque_qtd">0</span>)</h2>
     <ul id="lista_estoque" class="text-sm grid md:grid-cols-2 gap-x-6"></ul>
+  </section>
+
+  <section class="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
+    <h2 class="font-semibold mb-3">🔍 Avaliações (<span id="aval_qtd">0</span>)</h2>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead><tr class="text-slate-400 text-left border-b border-slate-700">
+          <th class="py-1 pr-3">Carro</th><th class="py-1 pr-3">Ano</th><th class="py-1 pr-3">FIPE</th>
+          <th class="py-1 pr-3">Cliente pensa</th><th class="py-1 pr-3">Avaliado</th>
+          <th class="py-1 pr-3">Interesse</th><th class="py-1">Observações</th>
+        </tr></thead>
+        <tbody id="lista_aval"></tbody>
+      </table>
+    </div>
   </section>
   <p class="text-center text-slate-600 text-xs mt-6">Atualizado em <span id="atualizado">—</span></p>
 </div>
@@ -161,6 +175,19 @@ function render(d){
 
   document.getElementById('estoque_qtd').textContent = d.estoque.quantidade;
   lista('lista_estoque', d.estoque.carros, x=>`${[x.marca,x.modelo,x.ano].filter(Boolean).join(' ')} <span class="text-emerald-400 float-right">${brl(x.preco_anuncio)}</span>`);
+
+  // avaliações
+  const av = (d.avaliacoes && d.avaliacoes.avaliacoes) || [];
+  document.getElementById('aval_qtd').textContent = d.avaliacoes ? d.avaliacoes.quantidade : 0;
+  const tb = document.getElementById('lista_aval');
+  tb.innerHTML = av.length ? av.map(x=>`<tr class="border-b border-slate-800">
+    <td class="py-2 pr-3">${[x.modelo,x.versao].filter(Boolean).join(' ')||'—'}</td>
+    <td class="py-2 pr-3">${x.ano||''}</td>
+    <td class="py-2 pr-3">${x.fipe?brl(x.fipe):'—'}</td>
+    <td class="py-2 pr-3">${x.valor_pretendido?brl(x.valor_pretendido):'—'}</td>
+    <td class="py-2 pr-3 text-emerald-400 font-semibold">${x.valor_avaliacao?brl(x.valor_avaliacao):'—'}</td>
+    <td class="py-2 pr-3 text-slate-400">${x.carro_interesse||'—'}</td>
+    <td class="py-2 text-slate-400">${x.obs||''}</td></tr>`).join('') : '<tr><td colspan="7" class="py-2 text-slate-500">Nenhuma avaliação</td></tr>';
 
   document.getElementById('atualizado').textContent = new Date().toLocaleString('pt-BR');
 }

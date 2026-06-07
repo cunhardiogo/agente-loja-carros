@@ -190,7 +190,8 @@ def entregas_agendadas(periodo: str = "mes") -> dict:
 def listar_avaliacoes(periodo: str = "mes") -> dict:
     ini, fim = _range(periodo)
     rows = db.select("avaliacoes", {
-        "select": "carro_troca,modelo,ano,km,fipe,valor_avaliacao,created_at,obs",
+        "select": "modelo,versao,ano,km,placa,fipe,valor_pretendido,valor_avaliacao,"
+                  "carro_interesse,obs,created_at",
         "order": "created_at.desc",
     })
     rows = [r for r in rows if _dentro(r.get("created_at"), ini, fim)]

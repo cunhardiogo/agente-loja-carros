@@ -22,7 +22,7 @@ pagamento (banco, valor_financiado, valor_pix, valor_avista, forma_pagamento), \
 troca (troca_modelo, troca_placa, troca_valor), ipva (cliente/loja), beneficios, portal_venda (ex Webmotors).
 - avaliacao: formulário "Avaliações" de um carro (pra troca/compra). Capture loja, modelo, combustivel, ano, km, placa, \
 checklist (ar_condicionado, gelando, buzina, limpador, luz_painel, chave_reserva, revisado = true/false a partir de (X)Sim/(X)Não), \
-revisao, pecas_qtd, pecas_obs, pneus, obs, fipe, valor_avaliacao. O campo "Modelo" é o carro avaliado (do cliente). O campo "Troca:" é o carro que o cliente QUER na troca → carro_interesse (ex 'kicks 2017').
+revisao, pecas_qtd, pecas_obs, pneus, obs, fipe, valor_avaliacao (valor que a loja avaliou), valor_pretendido (valor que o cliente pensa/pede pelo carro, se citado). O campo "Modelo" é o carro avaliado (do cliente) → preencha modelo (marca+modelo) e versao (motorização/versão, ex 'crv lx 2.0' → modelo 'CRV', versao 'LX 2.0'). O campo "Troca:" é o carro que o cliente QUER na troca → carro_interesse (ex 'kicks 2017').
 - entrega_agendada: item da lista do grupo de ENTREGAS. Capture loja, data_entrega, horario, vendedor, \
 veiculo_texto (ex 'ASX 2015 KPY-6D44'), placa, observacao. Se a mensagem tiver VÁRIAS entregas, extraia só a primeira \
 (o sistema processa uma por vez).
