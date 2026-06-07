@@ -9,6 +9,7 @@ class TipoEvento(str, Enum):
     agendamento = "agendamento"
     comparecimento = "comparecimento"
     anuncio = "anuncio"
+    anuncio_publicado = "anuncio_publicado"
     pagamento = "pagamento"
     entrega = "entrega"               # confirmação de que um carro foi entregue
     entrega_agendada = "entrega_agendada"  # item da lista do grupo de ENTREGAS

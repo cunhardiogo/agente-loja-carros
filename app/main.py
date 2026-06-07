@@ -101,7 +101,7 @@ def _metrics() -> dict:
         "a_receber": {"quantidade": a_receber["quantidade"], "valor": a_receber["valor_total_a_receber"],
                       "itens": a_receber["itens"]},
         "a_entregar": {"quantidade": a_entregar["quantidade"], "itens": a_entregar["itens"]},
-        "estoque": consulta.listar_carros("anunciado"),
+        "estoque": consulta.listar_carros("a_anunciar"),
         "agendamentos": consulta.resumo_agendamentos("mes"),
         "entregas": consulta.entregas_agendadas("mes"),
         "avaliacoes": consulta.listar_avaliacoes("mes"),
@@ -235,7 +235,7 @@ def _resumo_semanal_texto() -> str:
     ag = consulta.resumo_agendamentos("semana")
     res = consulta.reservados("mes")
     vlist = consulta.lista_vendas("tudo")
-    estoque = consulta.listar_carros("anunciado")
+    estoque = consulta.listar_carros("a_anunciar")
 
     linhas = [
         f"📈 *Resumo da semana* ({periodo})",
@@ -251,7 +251,7 @@ def _resumo_semanal_texto() -> str:
         focos.append(f"🅿️ Resolver {res['quantidade']} reservado(s): " + ", ".join(_reservado_carro(i) for i in res["itens"]))
     if vlist["a_entregar"]:
         focos.append(f"📦 Entregar {vlist['a_entregar']} carro(s) pendente(s)")
-    focos.append(f"📸 Anunciar carros (anunciados: {estoque['quantidade']})")
+    focos.append(f"📸 Anunciar {estoque['quantidade']} carro(s) que chegaram")
     focos.append("🔧 Verificar recalls pendentes")
     if ag["total"] < 5 or ag["taxa_comparecimento"] < 60:
         focos.append(f"📈 Captação: agendamento/comparecimento baixos ({ag['total']} agend · {ag['taxa_comparecimento']}%)")

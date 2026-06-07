@@ -151,11 +151,22 @@ def aplicar(ext: Extracao) -> tuple[str | None, str | None]:
         row = db.insert("veiculos", {
             "marca": ext.marca, "modelo": ext.modelo, "versao": ext.versao, "ano": ext.ano,
             "cor": ext.cor, "km": ext.km, "placa": ext.placa,
-            "preco_anuncio": ext.valor, "status": "anunciado",
+            "preco_anuncio": ext.valor, "status": "a_anunciar",
             "data_anuncio": ext.data_evento or datas.hoje_iso(),
             "observacoes": ext.veiculo_descricao or ext.resumo,
         })
         return "veiculos", row.get("id")
+
+    if t == TipoEvento.anuncio_publicado:
+        alvo = ext.modelo or ext.veiculo_descricao or ext.versao
+        if not alvo:
+            return None, None
+        rows = db.select("veiculos", {"select": "id", "status": "eq.a_anunciar",
+                                      "modelo": f"ilike.*{alvo}*", "order": "created_at.desc", "limit": "1"})
+        if not rows:
+            return None, None
+        db.update("veiculos", {"status": "anunciado"}, {"id": f"eq.{rows[0]['id']}"})
+        return "veiculos", rows[0]["id"]
 
     if t == TipoEvento.pagamento:
         v = _venda_pendente(ext.cliente_nome, "status_pagamento")

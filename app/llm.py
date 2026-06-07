@@ -26,7 +26,8 @@ revisao, pecas_qtd, pecas_obs, pneus, obs, fipe, valor_avaliacao (valor que a lo
 - entrega_agendada: item da lista do grupo de ENTREGAS. Capture loja, data_entrega, horario, vendedor, \
 veiculo_texto (ex 'ASX 2015 KPY-6D44'), placa, observacao. Se a mensagem tiver VÁRIAS entregas, extraia só a primeira \
 (o sistema processa uma por vez).
-- anuncio: carro novo entrando no estoque/anunciado (grupo de fotos). Capture marca, modelo, versao, ano, cor, km, valor (preço), placa.
+- anuncio: carro novo CHEGANDO no estoque (grupo de fotos), ainda a anunciar. Capture marca, modelo, versao, ano, cor, km, valor (preço), placa.
+- anuncio_publicado: avisa que um carro JÁ foi anunciado/publicado (ex 'anunciei o Corolla', 'subi o anúncio do 208'). Capture modelo/veiculo_descricao pra localizar.
 - pagamento: avisa que uma venda foi paga. Capture cliente_nome (e status_pagamento).
 - entrega: avisa que um carro JÁ foi entregue ao cliente. Capture cliente_nome.
 - comparecimento: avisa se cliente compareceu/faltou. Capture cliente_nome e compareceu (true/false).
