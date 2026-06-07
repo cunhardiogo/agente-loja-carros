@@ -212,9 +212,55 @@ def listar_avaliacoes(periodo: str = "mes") -> dict:
     return {"periodo": periodo, "quantidade": len(rows), "avaliacoes": rows}
 
 
+def _match(rows, termo, campos):
+    t = (termo or "").strip().lower()
+    if not t:
+        return None
+    for r in rows:
+        alvo = " ".join(str(r.get(c)) for c in campos if r.get(c)).lower()
+        if t in alvo:
+            return r
+    return None
+
+
+def marcar_entregue(cliente: str | None = None, veiculo: str | None = None) -> dict:
+    rows = [r for r in db.select("vendas", {"select": "id,cliente_nome,modelo,versao,status_entrega"})
+            if r.get("status_entrega") != "entregue"]
+    r = _match(rows, cliente or veiculo, ["cliente_nome", "modelo", "versao"])
+    if not r:
+        return {"erro": f"não achei venda pendente com '{cliente or veiculo}'"}
+    from . import datas
+    db.update("vendas", {"status_entrega": "entregue", "status_pagamento": "pago",
+                         "data_entrega_real": datas.hoje_iso()}, {"id": f"eq.{r['id']}"})
+    return {"ok": True, "entregue": f"{r['cliente_nome']} — {r.get('modelo','')} {r.get('versao','') or ''}".strip()}
+
+
+def marcar_pago(cliente: str | None = None, veiculo: str | None = None) -> dict:
+    rows = [r for r in db.select("vendas", {"select": "id,cliente_nome,modelo,versao,status_pagamento"})
+            if r.get("status_pagamento") != "pago"]
+    r = _match(rows, cliente or veiculo, ["cliente_nome", "modelo", "versao"])
+    if not r:
+        return {"erro": f"não achei venda a receber com '{cliente or veiculo}'"}
+    db.update("vendas", {"status_pagamento": "pago"}, {"id": f"eq.{r['id']}"})
+    return {"ok": True, "pago": f"{r['cliente_nome']} — {r.get('modelo','')}".strip()}
+
+
+def marcar_anunciado(veiculo: str) -> dict:
+    rows = [r for r in db.select("veiculos", {"select": "id,marca,modelo,versao,status"})
+            if r.get("status") == "a_anunciar"]
+    r = _match(rows, veiculo, ["marca", "modelo", "versao"])
+    if not r:
+        return {"erro": f"não achei carro a anunciar com '{veiculo}'"}
+    db.update("veiculos", {"status": "anunciado"}, {"id": f"eq.{r['id']}"})
+    return {"ok": True, "anunciado": f"{r.get('marca','')} {r.get('modelo','')}".strip()}
+
+
 DISPATCH = {
     "vendidos": vendidos,
     "reservados": reservados,
+    "marcar_entregue": marcar_entregue,
+    "marcar_pago": marcar_pago,
+    "marcar_anunciado": marcar_anunciado,
     "resumo_vendas": resumo_vendas,
     "ranking_vendedores": ranking_vendedores,
     "listar_carros": listar_carros,
@@ -236,6 +282,23 @@ TOOLS = [
         "name": "reservados",
         "description": "Quantos carros estão RESERVADOS no período (planilha, Status=Reservado).",
         "parameters": {"type": "object", "properties": {"periodo": _PERIODO}},
+    }},
+    {"type": "function", "function": {
+        "name": "marcar_entregue",
+        "description": "AÇÃO: marcar uma venda como entregue (e paga). Use quando o dono disser que entregou um carro.",
+        "parameters": {"type": "object", "properties": {
+            "cliente": {"type": "string"}, "veiculo": {"type": "string"}}},
+    }},
+    {"type": "function", "function": {
+        "name": "marcar_pago",
+        "description": "AÇÃO: marcar uma venda como paga/recebida. Use quando o dono disser que recebeu o pagamento.",
+        "parameters": {"type": "object", "properties": {
+            "cliente": {"type": "string"}, "veiculo": {"type": "string"}}},
+    }},
+    {"type": "function", "function": {
+        "name": "marcar_anunciado",
+        "description": "AÇÃO: marcar um carro como anunciado (sai da lista 'a anunciar'). Use quando o dono disser que anunciou/publicou.",
+        "parameters": {"type": "object", "properties": {"veiculo": {"type": "string"}}, "required": ["veiculo"]},
     }},
     {"type": "function", "function": {
         "name": "resumo_vendas",
@@ -285,6 +348,9 @@ Para FATURAMENTO/valores/ticket use 'resumo_vendas'. Se perguntarem "quantos ven
 chame as DUAS e combine (ex.: "6 vendidos, R$ X faturados").
 SEMPRE que falar de vendas/faturamento/financeiro, informe OBRIGATORIAMENTE os DOIS números juntos: \
 o FATURAMENTO TOTAL (resumo_vendas) e o total A RECEBER (pendencias tipo=pagamento). Nunca dê só um deles.
+Você também EXECUTA ações quando o dono pedir: marcar_entregue (entreguei o carro do X), marcar_pago (recebi/quitou a venda do X), \
+marcar_anunciado (anunciei/publiquei o carro Y). Use a ferramenta certa e confirme em 1 linha o que foi feito \
+(ou diga que não encontrou). Não invente que fez se a ferramenta retornar erro.
 Responda curto e direto, em português, formatando valores em reais como R$ 95.000.
 Para rankings/listas, use linhas curtas com emojis discretos. Se não houver dados, diga que não encontrou nada no período.
 Quando o usuário não especificar o período, assuma o mês atual."""
