@@ -95,6 +95,7 @@ def _metrics() -> dict:
     pendentes = db.select("eventos_brutos", {"select": "id", "status": "eq.pendente_confirmacao"})
     return {
         "vendidos_mes": consulta.vendidos("mes"),
+        "reservados_mes": consulta.reservados("mes"),
         "vendas_mes": consulta.resumo_vendas("mes"),
         "ranking": consulta.ranking_vendedores("mes")["ranking"],
         "a_receber": {"quantidade": a_receber["quantidade"], "valor": a_receber["valor_total_a_receber"],

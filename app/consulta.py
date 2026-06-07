@@ -164,6 +164,16 @@ def _range_futuro(periodo: str | None):
     return hoje.isoformat(), (hoje + timedelta(days=365)).isoformat()
 
 
+def reservados(periodo: str = "mes") -> dict:
+    """Quantos carros RESERVADOS no período, segundo a planilha (Status=Reservado)."""
+    ini, fim = _range(periodo)
+    rows = db.select("agendamentos", {"select": "cliente_nome,data_agendada,resultado,observacoes",
+                                      "origem": "eq.planilha"})
+    rows = [r for r in rows if (r.get("resultado") or "").strip().lower().startswith("reservad")
+            and _dentro(r.get("data_agendada"), ini, fim)]
+    return {"periodo": periodo, "quantidade": len(rows), "itens": rows}
+
+
 def entregas_agendadas(periodo: str = "mes") -> dict:
     ini, fim = _range_futuro(periodo)  # entregas são futuras: olha pra frente
     nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
@@ -189,6 +199,7 @@ def listar_avaliacoes(periodo: str = "mes") -> dict:
 
 DISPATCH = {
     "vendidos": vendidos,
+    "reservados": reservados,
     "resumo_vendas": resumo_vendas,
     "ranking_vendedores": ranking_vendedores,
     "listar_carros": listar_carros,
@@ -204,6 +215,11 @@ TOOLS = [
     {"type": "function", "function": {
         "name": "vendidos",
         "description": "Quantos carros foram VENDIDOS no período (contagem confiável da planilha).",
+        "parameters": {"type": "object", "properties": {"periodo": _PERIODO}},
+    }},
+    {"type": "function", "function": {
+        "name": "reservados",
+        "description": "Quantos carros estão RESERVADOS no período (planilha, Status=Reservado).",
         "parameters": {"type": "object", "properties": {"periodo": _PERIODO}},
     }},
     {"type": "function", "function": {

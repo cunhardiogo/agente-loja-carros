@@ -20,11 +20,16 @@
 
   <div id="erro" class="hidden bg-red-900/40 border border-red-700 text-red-200 rounded-lg p-4 mb-4"></div>
 
-  <section class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+  <section class="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
     <div class="bg-indigo-900/40 rounded-xl p-4 border border-indigo-600">
       <p class="text-indigo-300 text-xs uppercase">Vendidos no mês</p>
       <p class="text-3xl font-bold" id="kpi_vendidos">—</p>
       <p class="text-indigo-300 text-sm">da planilha</p>
+    </div>
+    <div class="bg-amber-900/30 rounded-xl p-4 border border-amber-700/60">
+      <p class="text-amber-300 text-xs uppercase">Reservados</p>
+      <p class="text-3xl font-bold" id="kpi_reservados">—</p>
+      <p class="text-amber-300 text-sm">da planilha</p>
     </div>
     <div class="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
       <p class="text-slate-400 text-xs uppercase">Faturamento (mês)</p>
@@ -117,6 +122,7 @@ function render(d){
   const v = d.vendas_mes;
   document.getElementById('subtitulo').textContent = 'Visão do mês atual';
   document.getElementById('kpi_vendidos').textContent = d.vendidos_mes.quantidade;
+  document.getElementById('kpi_reservados').textContent = d.reservados_mes.quantidade;
   document.getElementById('kpi_qtd').textContent = v.quantidade + ' c/ valor';
   document.getElementById('kpi_total').textContent = brl(v.valor_total);
   document.getElementById('kpi_ticket').textContent = brl(v.ticket_medio);
