@@ -1,5 +1,5 @@
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import httpx
 from openai import OpenAI
@@ -10,6 +10,8 @@ from .ingest import resolver_pessoa
 
 _http = httpx.Client(verify=settings.verify_ssl, timeout=60)
 _client = OpenAI(api_key=settings.openai_api_key, http_client=_http) if settings.openai_api_key else None
+
+_ctx = {"numero": None}  # quem está conversando (p/ lembretes irem pra pessoa certa)
 
 
 # ===== helpers =====
@@ -337,6 +339,35 @@ def atualizar_venda(cliente: str | None = None, veiculo: str | None = None, **ca
     return {"ok": True, "venda": f"{r['cliente_nome']} — {r.get('modelo','')}".strip(), "alterado": set_}
 
 
+def criar_lembrete(texto: str, quando: str) -> dict:
+    """Cria um lembrete. 'quando' em ISO (YYYY-MM-DD ou YYYY-MM-DDTHH:MM) no horário local."""
+    numero = _ctx.get("numero") or settings.meu_numero
+    q = (quando or "").strip()
+    if not q:
+        return {"erro": "diga quando devo lembrar"}
+    if len(q) == 10:  # só data → assume 09:00
+        q += "T09:00:00"
+    if "T" in q and len(q) <= 19:  # sem fuso → assume São Paulo
+        q += "-03:00"
+    db.insert("lembretes", {"numero": numero, "texto": texto, "quando": q})
+    return {"ok": True, "lembrete": texto, "quando": quando}
+
+
+def _fmt_local(iso: str | None) -> str:
+    try:
+        return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(datas.TZ).strftime("%d/%m %H:%M")
+    except Exception:
+        return iso or ""
+
+
+def listar_lembretes() -> dict:
+    numero = _ctx.get("numero") or settings.meu_numero
+    rows = db.select("lembretes", {"select": "texto,quando", "numero": f"eq.{numero}",
+                                   "enviado": "eq.false", "order": "quando.asc"})
+    itens = [{"texto": r["texto"], "quando": _fmt_local(r.get("quando"))} for r in rows]
+    return {"quantidade": len(itens), "lembretes": itens}
+
+
 def atualizar_carro(veiculo: str, preco_anuncio: float | None = None, status: str | None = None,
                     cor: str | None = None, km: int | None = None, ano: int | None = None) -> dict:
     """Edita um carro do estoque (preço, status, cor, km, ano). Localiza por marca/modelo/versão."""
@@ -417,6 +448,8 @@ DISPATCH = {
     "marcar_anunciado": marcar_anunciado,
     "atualizar_venda": atualizar_venda,
     "atualizar_carro": atualizar_carro,
+    "criar_lembrete": criar_lembrete,
+    "listar_lembretes": listar_lembretes,
     "resumo_vendas": resumo_vendas,
     "ranking_vendedores": ranking_vendedores,
     "listar_carros": listar_carros,
@@ -480,6 +513,18 @@ TOOLS = [
             "veiculo": {"type": "string"}, "preco_anuncio": {"type": "number"},
             "status": {"type": "string", "enum": ["a_anunciar", "anunciado", "reservado", "vendido", "entregue", "inativo"]},
             "cor": {"type": "string"}, "km": {"type": "integer"}, "ano": {"type": "integer"}}, "required": ["veiculo"]},
+    }},
+    {"type": "function", "function": {
+        "name": "criar_lembrete",
+        "description": "AÇÃO: criar um lembrete. Use quando o dono pedir p/ ser lembrado. Calcule 'quando' em ISO a partir da DATA DE HOJE (ex.: 'amanhã 10h', 'sexta 14h', 'daqui 2h').",
+        "parameters": {"type": "object", "properties": {
+            "texto": {"type": "string", "description": "o que lembrar"},
+            "quando": {"type": "string", "description": "ISO YYYY-MM-DDTHH:MM (horário local)"}}, "required": ["texto", "quando"]},
+    }},
+    {"type": "function", "function": {
+        "name": "listar_lembretes",
+        "description": "Lista os lembretes pendentes do dono.",
+        "parameters": {"type": "object", "properties": {}},
     }},
     {"type": "function", "function": {
         "name": "resumo_vendas",
@@ -563,6 +608,7 @@ ANÁLISES: você tem vendas_por_canal (qual portal vende mais), margem_avaliacoe
 AÇÕES quando o dono pedir: marcar_entregue, marcar_pago, marcar_anunciado, e EDITAR registros: atualizar_venda \
 (corrigir canal/valor/vendedor/pagamento/datas/cliente de uma venda — ex 'a venda do Denilson foi pelo tráfego', 'a do João foi 95 mil') \
 e atualizar_carro (preço/status/cor/km do estoque). Confirme em 1 linha o que mudou (ou que não encontrou). Nunca invente se a ferramenta der erro. \
+LEMBRETES: criar_lembrete quando o dono pedir p/ ser lembrado (calcule 'quando' em ISO a partir da DATA DE HOJE); listar_lembretes p/ ver os pendentes.
 OBS: agendamento, comparecimento, vendido e reservado vêm da PLANILHA — não dá pra editar por aqui; nesse caso oriente a corrigir na planilha.
 
 ESTILO: curto e direto, em português, valores como R$ 95.000, listas em linhas curtas com emojis discretos. \
@@ -590,9 +636,10 @@ def salvar_conversa(numero: str, papel: str, conteudo: str) -> None:
         pass
 
 
-def responder(pergunta: str, historico: list | None = None) -> str:
+def responder(pergunta: str, historico: list | None = None, numero: str | None = None) -> str:
     if _client is None:
         return "IA não configurada (falta OPENAI_API_KEY)."
+    _ctx["numero"] = numero
     messages = [{"role": "system", "content": _system_dinamico()}]
     messages += historico or []
     messages.append({"role": "user", "content": pergunta})

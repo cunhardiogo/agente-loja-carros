@@ -79,7 +79,7 @@ def _consulta(pergunta: str, numero: str):
         resposta = confirmacao.tentar_resolver(pergunta)
         if resposta is None:
             historico = consulta.carregar_historico(numero)
-            resposta = consulta.responder(pergunta, historico)
+            resposta = consulta.responder(pergunta, historico, numero)
     except Exception:
         log.exception("erro na consulta")
         resposta = "Tive um problema ao consultar agora. Pode tentar de novo?"
@@ -278,6 +278,24 @@ def cron_semanal(token: str = ""):
     texto = _resumo_semanal_texto()
     evolution.enviar_relatorio(texto)
     return {"enviado": True, "resumo": texto}
+
+
+@app.api_route("/cron/lembretes", methods=["GET", "POST"])
+def cron_lembretes(token: str = ""):
+    if not settings.dashboard_token or token != settings.dashboard_token:
+        return JSONResponse({"erro": "não autorizado"}, status_code=401)
+    agora = datas.agora().isoformat()
+    rows = db.select("lembretes", {"select": "id,numero,texto", "enviado": "eq.false",
+                                   "quando": f"lte.{agora}"})
+    enviados = 0
+    for r in rows:
+        try:
+            evolution.enviar_texto(r["numero"], "⏰ Lembrete: " + r["texto"])
+            db.update("lembretes", {"enviado": True}, {"id": f"eq.{r['id']}"})
+            enviados += 1
+        except Exception:
+            log.exception("erro enviando lembrete")
+    return {"enviados": enviados}
 
 
 @app.api_route("/cron/agenda-manha", methods=["GET", "POST"])
