@@ -15,6 +15,31 @@ app = FastAPI(title="Agente Loja de Carros — Grupo SB")
 
 import time as _time
 _ult_lembrete = {"t": 0.0}
+_lojasb_ok = {"v": True}
+
+
+def _checar_lojasb() -> None:
+    if not settings.evolution_assist_instance:
+        return
+    try:
+        st = evolution.estado(settings.evolution_assist_instance, settings.evolution_assist_apikey)
+    except Exception:
+        return
+    ok = (st == "open")
+    if _lojasb_ok["v"] and not ok:  # caiu
+        for n in evolution.numeros_alerta():
+            try:
+                evolution.enviar_por_coletor(n, "🚨 ALERTA: o agente (lojasb) DESCONECTOU do WhatsApp. "
+                                             "Reconecte em evo.agenteintel.com.br/manager — sem isso ele não envia relatórios nem lembretes.")
+            except Exception:
+                log.exception("erro alertando queda lojasb")
+    elif ok and not _lojasb_ok["v"]:  # voltou
+        for n in evolution.numeros_alerta():
+            try:
+                evolution.enviar_por_coletor(n, "✅ Agente (lojasb) reconectado. Tudo normal.")
+            except Exception:
+                pass
+    _lojasb_ok["v"] = ok
 
 
 def _disparar_lembretes() -> int:
@@ -35,12 +60,13 @@ def _disparar_lembretes() -> int:
 @app.api_route("/", methods=["GET", "HEAD"])
 @app.api_route("/health", methods=["GET", "HEAD"])
 def health():
-    try:  # aproveita o ping do UptimeRobot (5 min) p/ disparar lembretes vencidos
+    try:  # aproveita o ping do UptimeRobot (5 min): dispara lembretes + checa conexão do lojasb
         if _time.time() - _ult_lembrete["t"] > 60:
             _ult_lembrete["t"] = _time.time()
             _disparar_lembretes()
+            _checar_lojasb()
     except Exception:
-        log.exception("erro no check de lembretes")
+        log.exception("erro no check periódico")
     return {"ok": True}
 
 

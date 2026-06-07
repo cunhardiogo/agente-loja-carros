@@ -55,6 +55,21 @@ def _destinatarios() -> list[str]:
     return [n for n in dict.fromkeys(nums) if n]  # remove vazios e duplicados
 
 
+def estado(instance: str, apikey: str) -> str | None:
+    with httpx.Client(base_url=_base, headers={"apikey": apikey}, verify=settings.verify_ssl, timeout=20) as c:
+        r = c.get(f"/instance/connectionState/{instance}")
+        r.raise_for_status()
+        return (r.json().get("instance") or {}).get("state")
+
+
+def enviar_por_coletor(numero: str, texto: str) -> dict:
+    return _send(settings.evolution_instance, settings.evolution_apikey, numero, texto)
+
+
+def numeros_alerta() -> list[str]:
+    return [n.strip() for n in (settings.numeros_relatorio or "").split(",") if n.strip()]
+
+
 def enviar_relatorio(texto: str) -> None:
     for numero in _destinatarios():
         try:
