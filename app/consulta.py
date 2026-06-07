@@ -140,6 +140,43 @@ def resumo_agendamentos(periodo: str = "semana", compareceu: bool | None = None)
     }
 
 
+def _range_ag(periodo: str | None):
+    import calendar
+    hoje = datas.hoje()
+    p = (periodo or "hoje").lower()
+    if p == "hoje":
+        return hoje.isoformat(), hoje.isoformat()
+    if p == "amanha":
+        d = (hoje + timedelta(days=1)).isoformat()
+        return d, d
+    if p == "semana":
+        ini = hoje - timedelta(days=hoje.weekday())
+        return ini.isoformat(), (ini + timedelta(days=6)).isoformat()
+    if p == "mes":
+        ult = hoje.replace(day=calendar.monthrange(hoje.year, hoje.month)[1])
+        return hoje.replace(day=1).isoformat(), ult.isoformat()
+    return None, None
+
+
+def listar_agendamentos(periodo: str = "hoje") -> dict:
+    """Lista detalhada de agendamentos (cliente, horário, vendedor, status) num período."""
+    ini, fim = _range_ag(periodo)
+    nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
+    rows = db.select("agendamentos", {"select": "cliente_nome,data_agendada,vendedor_id,resultado,compareceu",
+                                      "origem": "eq.planilha"})
+    rows = [r for r in rows if _dentro(r.get("data_agendada"), ini, fim)]
+    rows.sort(key=lambda r: r.get("data_agendada") or "")
+    itens = []
+    for r in rows:
+        d = r.get("data_agendada") or ""
+        hora = d[11:16] if len(d) >= 16 and d[11:16] != "00:00" else ""
+        comp = {True: "compareceu", False: "faltou"}.get(r.get("compareceu"), "")
+        itens.append({"cliente": r.get("cliente_nome"), "data": d[:10], "hora": hora,
+                      "vendedor": nomes.get(r.get("vendedor_id"), "—"),
+                      "status": r.get("resultado") or comp})
+    return {"periodo": periodo, "quantidade": len(itens), "agendamentos": itens}
+
+
 def vendidos(periodo: str = "mes") -> dict:
     """Quantos carros VENDIDOS no período, segundo a planilha (Status=VENDIDO)."""
     ini, fim = _range(periodo)
@@ -258,6 +295,7 @@ def marcar_anunciado(veiculo: str) -> dict:
 DISPATCH = {
     "vendidos": vendidos,
     "reservados": reservados,
+    "listar_agendamentos": listar_agendamentos,
     "marcar_entregue": marcar_entregue,
     "marcar_pago": marcar_pago,
     "marcar_anunciado": marcar_anunciado,
@@ -325,9 +363,15 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "resumo_agendamentos",
-        "description": "Agendamentos num período e taxa de comparecimento. compareceu=false lista quem faltou.",
+        "description": "RESUMO de agendamentos num período: total e taxa de comparecimento (quantos vieram/faltaram).",
         "parameters": {"type": "object", "properties": {
             "periodo": _PERIODO, "compareceu": {"type": "boolean"}}},
+    }},
+    {"type": "function", "function": {
+        "name": "listar_agendamentos",
+        "description": "LISTA detalhada dos agendamentos (cliente, horário, vendedor, status). Use para 'quais os agendamentos de hoje/amanhã/essa semana'.",
+        "parameters": {"type": "object", "properties": {
+            "periodo": {"type": "string", "enum": ["hoje", "amanha", "semana", "mes"]}}},
     }},
     {"type": "function", "function": {
         "name": "entregas_agendadas",
