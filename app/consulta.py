@@ -619,7 +619,7 @@ Use o histórico da conversa para entender perguntas curtas de continuação ("e
 def _system_dinamico() -> str:
     h = datas.agora()
     dias = ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"]
-    return SYSTEM + f"\n\nDATA DE HOJE: {h.strftime('%Y-%m-%d')} ({dias[h.weekday()]})."
+    return SYSTEM + f"\n\nDATA E HORA DE HOJE (horário de Brasília): {h.strftime('%Y-%m-%d %H:%M')} ({dias[h.weekday()]})."
 
 
 def carregar_historico(numero: str, limite: int = 6) -> list:
