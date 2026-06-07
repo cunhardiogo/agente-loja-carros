@@ -165,7 +165,9 @@ function render(d){
   });
   lista('lista_entregar', d.a_entregar.itens, x=>`${x.cliente_nome||'—'} <span class="text-slate-400 float-right">${x.data_entrega_prevista||'sem data'}</span>`);
   document.getElementById('entregas_qtd').textContent = d.entregas.quantidade;
-  lista('lista_entregas', d.entregas.entregas, x=>`${x.veiculo||'—'} <span class="text-slate-400 float-right">${(x.data_entrega||'')+' '+(x.horario||'')}</span><br><span class="text-xs text-slate-500">${x.vendedor||''} ${x.observacao?('· '+x.observacao):''}</span>`);
+  const dm = s => s ? s.slice(8,10)+'/'+s.slice(5,7) : '';
+  const hm = s => s ? s.slice(0,5) : '';
+  lista('lista_entregas', d.entregas.entregas, x=>`${x.veiculo||'—'} <span class="text-slate-400 float-right">${dm(x.data_entrega)} ${hm(x.horario)}</span><br><span class="text-xs text-slate-500">${x.vendedor||''} ${x.observacao?('· '+x.observacao):''}</span>`);
   document.getElementById('estoque_qtd').textContent = d.estoque.quantidade;
   lista('lista_estoque', d.estoque.carros, x=>`${[x.marca,x.modelo,x.ano].filter(Boolean).join(' ')} <span class="text-emerald-400 float-right">${brl(x.preco_anuncio)}</span>`);
 
