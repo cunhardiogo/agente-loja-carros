@@ -246,27 +246,49 @@ def _resumo_diario_texto() -> str:
     ag = consulta.resumo_agendamentos("hoje")
     res = consulta.reservados("mes")
 
-    vendas = db.select("vendas", {"select": "cliente_nome,modelo,versao,status_entrega,data_entrega_real"})
+    nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
+    vendas = db.select("vendas", {"select": "cliente_nome,modelo,versao,valor_venda,vendedor_id,"
+                                  "data_venda,status_entrega,data_entrega_real"})
+    vendas_hoje = [v for v in vendas if (v.get("data_venda") or "")[:10] == hoje]
     feitas = [v for v in vendas if v.get("status_entrega") == "entregue" and (v.get("data_entrega_real") or "")[:10] == hoje]
     pendentes = [v for v in vendas if v.get("status_entrega") != "entregue"]
+
+    L = [
+        f"📊 *Fechamento de hoje* ({datas.hoje().strftime('%d/%m')})",
+        f"🏆 Vendidos hoje: {vh['quantidade']} · no mês: {vm['quantidade']}",
+        f"💵 Faturamento do mês: {_brl(fat['valor_total'])} · 📉 a receber {_brl(receber['valor_total_a_receber'])}",
+    ]
+    if vendas_hoje:
+        L.append("🚗 *Vendas de hoje:*")
+        for v in vendas_hoje:
+            L.append(f"- {_carro(v)} {_brl(v.get('valor_venda'))} ({nomes.get(v.get('vendedor_id'), '—')})")
+
     feitas_txt = f"{len(feitas)} feita" + ("s" if len(feitas) != 1 else "")
     if feitas:
         feitas_txt += " (" + ", ".join(_carro(v) for v in feitas) + ")"
+    L.append(f"📦 Entregas: {feitas_txt} · {len(pendentes)} pendentes")
 
-    linhas = [
-        f"📊 *Fechamento de hoje* ({datas.hoje().strftime('%d/%m')})",
-        f"🏆 Vendidos hoje: {vh['quantidade']} · no mês: {vm['quantidade']}",
-        f"💵 Faturamento do mês: {_brl(fat['valor_total'])}",
-        f"📉 A receber: {_brl(receber['valor_total_a_receber'])}",
-        f"📦 Entregas: {feitas_txt} · {len(pendentes)} pendentes",
-        f"📅 Agendamentos hoje: {ag['total']} (✅ {ag['compareceram']} · ❌ {ag['faltaram']})",
-        f"🅿️ Reservados: {res['quantidade']}",
-    ]
+    ags_hoje = consulta.listar_agendamentos("hoje")["agendamentos"]
+    faltou = [a["cliente"] for a in ags_hoje if a.get("status") and
+              ("falt" in a["status"].lower() or "cancel" in a["status"].lower() or "veio" in a["status"].lower())]
+    linha = f"📅 Agendamentos hoje: {ag['total']} (✅ {ag['compareceram']} · ❌ {ag['faltaram']})"
+    if faltou:
+        linha += " — faltaram: " + ", ".join(faltou)
+    L.append(linha)
+    L.append(f"🅿️ Reservados: {res['quantidade']}")
+
     av = consulta.listar_avaliacoes("hoje")
     if av["quantidade"]:
-        itens = ", ".join(f"{a.get('modelo', '')} avaliado {_brl(a.get('valor_avaliacao'))}" for a in av["avaliacoes"])
-        linhas.append(f"🔍 Avaliações hoje: {av['quantidade']} ({itens})")
-    return "\n".join(linhas)
+        L.append("🔍 Avaliações: " + ", ".join(f"{a.get('modelo', '')} {_brl(a.get('valor_avaliacao'))}" for a in av["avaliacoes"]))
+
+    if receber["itens"]:
+        top = max(receber["itens"], key=lambda x: x["a_receber"])
+        L.append(f"💸 Maior pendência: {top['cliente_nome']} {_brl(top['a_receber'])}")
+
+    am = consulta.listar_agendamentos("amanha")["agendamentos"]
+    if am:
+        L.append(f"🔜 Amanhã: {len(am)} agendamento(s)")
+    return "\n".join(L)
 
 
 @app.api_route("/cron/sync-planilha", methods=["GET", "POST"])
@@ -295,27 +317,47 @@ def _resumo_semanal_texto() -> str:
     vlist = consulta.lista_vendas("tudo")
     estoque = consulta.listar_carros("a_anunciar")
 
-    linhas = [
+    ags = consulta.listar_agendamentos("semana")["agendamentos"]
+    entregas = consulta.entregas_agendadas("semana")["entregas"]
+
+    L = [
         f"📈 *Resumo da semana* ({periodo})",
-        f"🏆 Vendidos: {vend['quantidade']} · 💵 Faturamento: {_brl(fat['valor_total'])}",
-        f"📉 A receber: {_brl(receber['valor_total_a_receber'])}",
+        f"🏆 Vendidos: {vend['quantidade']} · 💵 {_brl(fat['valor_total'])} · 📉 a receber {_brl(receber['valor_total_a_receber'])}",
     ]
     if ranking:
-        linhas.append("🥇 Vendedores: " + " · ".join(f"{r['vendedor']} {r['quantidade']}" for r in ranking[:5]))
-    linhas.append(f"📅 Agendamentos: {ag['total']} (✅ {ag['compareceram']} · ❌ {ag['faltaram']} · {ag['taxa_comparecimento']}%)")
+        L.append("🥇 " + " · ".join(f"{r['vendedor']} {r['quantidade']}" for r in ranking[:5]))
+    L.append(f"📅 Comparecimento: {ag['taxa_comparecimento']}% (✅ {ag['compareceram']} · ❌ {ag['faltaram']})")
+
+    L.append(f"\n📅 *Agendamentos da semana ({len(ags)}):*")
+    for a in ags[:15]:
+        h = f" {a['hora']}" if a.get("hora") else ""
+        st = f" – {a['status']}" if a.get("status") else ""
+        L.append(f"- {a['cliente']} ({_dm(a['data'])}{h}, {a['vendedor']}){st}")
+    if len(ags) > 15:
+        L.append(f"... +{len(ags) - 15} na lista")
+
+    if entregas:
+        L.append("\n🚗 *Entregas agendadas:*")
+        for e in entregas:
+            L.append(f"- {e.get('veiculo', '—')} ({_dm(e.get('data_entrega'))}, {(e.get('horario') or '')[:5]}, {e.get('vendedor', '')})")
+
+    if receber["itens"]:
+        L.append(f"\n💰 *A receber ({_brl(receber['valor_total_a_receber'])}):*")
+        for it in receber["itens"]:
+            L.append(f"- {it['cliente_nome']} – {it.get('veiculo', '')}: {_brl(it['a_receber'])}")
 
     focos = []
     if res["quantidade"]:
-        focos.append(f"🅿️ Resolver {res['quantidade']} reservado(s): " + ", ".join(_reservado_carro(i) for i in res["itens"]))
+        focos.append(f"resolver {res['quantidade']} reservado(s)")
     if vlist["a_entregar"]:
-        focos.append(f"📦 Entregar {vlist['a_entregar']} carro(s) pendente(s)")
-    focos.append(f"📸 Anunciar {estoque['quantidade']} carro(s) que chegaram")
-    focos.append("🔧 Verificar recalls pendentes")
+        focos.append(f"entregar {vlist['a_entregar']} carro(s)")
+    if estoque["quantidade"]:
+        focos.append(f"anunciar {estoque['quantidade']} carro(s)")
     if ag["total"] < 5 or ag["taxa_comparecimento"] < 60:
-        focos.append(f"📈 Captação: agendamento/comparecimento baixos ({ag['total']} agend · {ag['taxa_comparecimento']}%)")
-
-    linhas += ["", "🎯 *Focos pra semana:*"] + [f"• {f}" for f in focos]
-    return "\n".join(linhas)
+        focos.append("melhorar captação/comparecimento")
+    if focos:
+        L.append("\n🎯 *Focos:* " + " · ".join(focos))
+    return "\n".join(L)
 
 
 @app.api_route("/cron/resumo-semanal", methods=["GET", "POST"])
