@@ -83,6 +83,7 @@ class Extracao(BaseModel):
     fipe: float | None = None
     valor_avaliacao: float | None = None
     carro_troca: str | None = Field(None, description="Carro avaliado/da troca, ex 'C4 Lounge 2014'")
+    carro_interesse: str | None = Field(None, description="Na avaliação, o carro que o cliente quer na troca (campo 'Troca:'), ex 'kicks 2017'")
     ar_condicionado: bool | None = None
     gelando: bool | None = None
     buzina: bool | None = None

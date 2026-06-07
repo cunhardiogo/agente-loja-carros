@@ -113,7 +113,8 @@ def aplicar(ext: Extracao) -> tuple[str | None, str | None]:
             "revisado": ext.revisado, "revisao": ext.revisao, "pecas_qtd": ext.pecas_qtd,
             "pecas_obs": ext.pecas_obs, "pneus": ext.pneus, "obs": ext.obs,
             "fipe": ext.fipe, "valor_avaliacao": ext.valor_avaliacao or ext.valor,
-            "carro_troca": ext.carro_troca, "vendedor_id": vend["id"] if vend else None,
+            "carro_troca": ext.carro_troca, "carro_interesse": ext.carro_interesse,
+            "vendedor_id": vend["id"] if vend else None,
         })
         return "avaliacoes", row.get("id")
 
