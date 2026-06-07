@@ -97,6 +97,19 @@
       </table>
     </div>
   </section>
+
+  <section class="bg-slate-800/60 rounded-xl p-4 border border-slate-700 mt-6">
+    <h2 class="font-semibold mb-3">🚗 Carros vendidos (<span id="vend_qtd">0</span>) · <span class="text-amber-400" id="vend_pend">0 a entregar</span></h2>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead><tr class="text-slate-400 text-left border-b border-slate-700">
+          <th class="py-1 pr-3">Cliente</th><th class="py-1 pr-3">Carro</th><th class="py-1 pr-3">Valor</th>
+          <th class="py-1 pr-3">Venda</th><th class="py-1 pr-3">Entrega</th><th class="py-1">Pagamento</th>
+        </tr></thead>
+        <tbody id="lista_vendidos"></tbody>
+      </table>
+    </div>
+  </section>
   <p class="text-center text-slate-600 text-xs mt-6">Atualizado em <span id="atualizado">—</span></p>
 </div>
 
@@ -175,6 +188,26 @@ function render(d){
     <td class="py-2 pr-3 text-emerald-400 font-semibold">${x.valor_avaliacao?brl(x.valor_avaliacao):'—'}</td>
     <td class="py-2 pr-3 text-slate-400">${x.carro_interesse||'—'}</td>
     <td class="py-2 text-slate-400">${x.obs||''}</td></tr>`).join('') : '<tr><td colspan="7" class="py-2 text-slate-500">Nenhuma avaliação</td></tr>';
+
+  // carros vendidos (controle de entrega)
+  const vl = (d.vendas_lista && d.vendas_lista.vendas) || [];
+  document.getElementById('vend_qtd').textContent = d.vendas_lista ? d.vendas_lista.quantidade : 0;
+  document.getElementById('vend_pend').textContent = (d.vendas_lista ? d.vendas_lista.a_entregar : 0) + ' a entregar';
+  const tbv = document.getElementById('lista_vendidos');
+  tbv.innerHTML = vl.length ? vl.map(x=>{
+    const entregue = x.status_entrega === 'entregue';
+    const ent = entregue
+      ? `<span class="text-emerald-400">✅ Entregue${x.data_entrega_real?(' '+dm(x.data_entrega_real)):''}</span>`
+      : `<span class="text-amber-400">⏳ Pendente${x.data_entrega_prevista?(' '+dm(x.data_entrega_prevista)):''}</span>`;
+    const pago = x.status_pagamento === 'pago' ? '<span class="text-emerald-400">pago</span>' : '<span class="text-slate-400">pendente</span>';
+    return `<tr class="border-b border-slate-800 ${entregue?'':'bg-amber-900/10'}">
+      <td class="py-2 pr-3">${x.cliente_nome||'—'}</td>
+      <td class="py-2 pr-3 text-slate-300">${[x.modelo,x.versao].filter(Boolean).join(' ')||'—'}</td>
+      <td class="py-2 pr-3">${brl(x.valor_venda)}</td>
+      <td class="py-2 pr-3 text-slate-400">${dm(x.data_venda)}</td>
+      <td class="py-2 pr-3">${ent}</td>
+      <td class="py-2">${pago}</td></tr>`;
+  }).join('') : '<tr><td colspan="6" class="py-2 text-slate-500">Nenhuma venda</td></tr>';
 
   document.getElementById('atualizado').textContent = new Date().toLocaleString('pt-BR');
 }

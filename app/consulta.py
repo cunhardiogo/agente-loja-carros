@@ -187,6 +187,20 @@ def entregas_agendadas(periodo: str = "mes") -> dict:
     return {"periodo": periodo, "quantidade": len(rows), "entregas": rows}
 
 
+def lista_vendas(periodo: str = "tudo") -> dict:
+    """Lista as vendas com status de entrega/pagamento (controle do que falta entregar)."""
+    ini, fim = _range(periodo)
+    rows = db.select("vendas", {
+        "select": "cliente_nome,modelo,versao,placa,valor_venda,data_venda,"
+                  "status_entrega,status_pagamento,data_entrega_prevista,data_entrega_real",
+        "order": "data_venda.desc.nullslast",
+    })
+    if ini:
+        rows = [r for r in rows if _dentro(r.get("data_venda"), ini, fim)]
+    a_entregar = sum(1 for r in rows if r.get("status_entrega") != "entregue")
+    return {"quantidade": len(rows), "a_entregar": a_entregar, "vendas": rows}
+
+
 def listar_avaliacoes(periodo: str = "mes") -> dict:
     ini, fim = _range(periodo)
     rows = db.select("avaliacoes", {
