@@ -195,6 +195,28 @@ def _carro(v: dict) -> str:
     return " ".join(x for x in (v.get("modelo"), v.get("versao")) if x) or "carro"
 
 
+def _buckets(ags: list) -> dict:
+    from collections import Counter
+
+    def b(s):
+        s = (s or "").lower()
+        if "vendido" in s:
+            return "Vendidos"
+        if "reserv" in s:
+            return "Reservados"
+        if "realizado" in s or "comparec" in s:
+            return "Compareceram"
+        if "cancel" in s or "falt" in s or "veio" in s:
+            return "Cancelados/faltas"
+        if "agendad" in s:
+            return "Agendados"
+        return "Outros"
+
+    c = Counter(b(a.get("status")) for a in ags)
+    ordem = ["Vendidos", "Reservados", "Compareceram", "Agendados", "Cancelados/faltas", "Outros"]
+    return {k: c[k] for k in ordem if c.get(k)}
+
+
 def _reservado_carro(it: dict) -> str:
     partes = [p.strip() for p in (it.get("observacoes") or "").split("·")]
     return partes[2] if len(partes) > 2 and partes[2] else (it.get("cliente_nome") or "—")
@@ -268,13 +290,7 @@ def _resumo_diario_texto() -> str:
         feitas_txt += " (" + ", ".join(_carro(v) for v in feitas) + ")"
     L.append(f"📦 Entregas: {feitas_txt} · {len(pendentes)} pendentes")
 
-    ags_hoje = consulta.listar_agendamentos("hoje")["agendamentos"]
-    faltou = [a["cliente"] for a in ags_hoje if a.get("status") and
-              ("falt" in a["status"].lower() or "cancel" in a["status"].lower() or "veio" in a["status"].lower())]
-    linha = f"📅 Agendamentos hoje: {ag['total']} (✅ {ag['compareceram']} · ❌ {ag['faltaram']})"
-    if faltou:
-        linha += " — faltaram: " + ", ".join(faltou)
-    L.append(linha)
+    L.append(f"📅 Agendamentos hoje: {ag['total']} · comparecimento {ag['taxa_comparecimento']}% (✅ {ag['compareceram']} · ❌ {ag['faltaram']})")
     L.append(f"🅿️ Reservados: {res['quantidade']}")
 
     av = consulta.listar_avaliacoes("hoje")
@@ -319,6 +335,7 @@ def _resumo_semanal_texto() -> str:
 
     ags = consulta.listar_agendamentos("semana")["agendamentos"]
     entregas = consulta.entregas_agendadas("semana")["entregas"]
+    conv = consulta.conversao("semana")
 
     L = [
         f"📈 *Resumo da semana* ({periodo})",
@@ -326,15 +343,13 @@ def _resumo_semanal_texto() -> str:
     ]
     if ranking:
         L.append("🥇 " + " · ".join(f"{r['vendedor']} {r['quantidade']}" for r in ranking[:5]))
-    L.append(f"📅 Comparecimento: {ag['taxa_comparecimento']}% (✅ {ag['compareceram']} · ❌ {ag['faltaram']})")
 
-    L.append(f"\n📅 *Agendamentos da semana ({len(ags)}):*")
-    for a in ags[:15]:
-        h = f" {a['hora']}" if a.get("hora") else ""
-        st = f" – {a['status']}" if a.get("status") else ""
-        L.append(f"- {a['cliente']} ({_dm(a['data'])}{h}, {a['vendedor']}){st}")
-    if len(ags) > 15:
-        L.append(f"... +{len(ags) - 15} na lista")
+    tot = len(ags)
+    bk = _buckets(ags)
+    pct = lambda n: f"{round(n / tot * 100)}%" if tot else "0%"
+    L.append(f"\n📅 *Agendamentos: {tot}* · comparecimento {ag['taxa_comparecimento']}% · conversão {conv['taxa_conversao']}%")
+    if tot:
+        L.append("   " + " · ".join(f"{k} {v} ({pct(v)})" for k, v in bk.items()))
 
     if entregas:
         L.append("\n🚗 *Entregas agendadas:*")
@@ -358,6 +373,60 @@ def _resumo_semanal_texto() -> str:
     if focos:
         L.append("\n🎯 *Focos:* " + " · ".join(focos))
     return "\n".join(L)
+
+
+def _planejamento_semana_texto() -> str:
+    from datetime import datetime as _dt, timedelta
+    hoje = datas.hoje()
+    ini = hoje - timedelta(days=hoje.weekday())
+    fim = ini + timedelta(days=6)
+    ags = consulta.listar_agendamentos("semana")["agendamentos"]
+    entregas = consulta.entregas_agendadas("semana")["entregas"]
+    estoque = consulta.listar_carros("a_anunciar")
+    vlist = consulta.lista_vendas("tudo")
+    res = consulta.reservados("mes")
+    receber = consulta.pendencias("pagamento")
+
+    from collections import Counter
+    abrev = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+    cont = Counter()
+    for a in ags:
+        try:
+            cont[_dt.fromisoformat(a["data"]).weekday()] += 1
+        except Exception:
+            pass
+    pordia = " · ".join(f"{abrev[d]} {cont[d]}" for d in range(7) if cont[d])
+
+    L = [f"🗓️ *Planejamento da semana* ({ini.strftime('%d/%m')} a {fim.strftime('%d/%m')})",
+         f"📅 {len(ags)} agendamentos" + (f" — {pordia}" if pordia else "")]
+    if entregas:
+        L.append(f"🚗 {len(entregas)} entregas: " + ", ".join(
+            f"{(e.get('veiculo') or '')[:18]} ({_dm(e.get('data_entrega'))})" for e in entregas[:8]))
+    tarefas = []
+    if estoque["quantidade"]:
+        tarefas.append(f"anunciar {estoque['quantidade']} carro(s)")
+    if vlist["a_entregar"]:
+        tarefas.append(f"entregar {vlist['a_entregar']} carro(s)")
+    if res["quantidade"]:
+        tarefas.append(f"resolver {res['quantidade']} reservado(s)")
+    if receber["valor_total_a_receber"]:
+        tarefas.append(f"receber {_brl(receber['valor_total_a_receber'])}")
+    if tarefas:
+        L.append("🎯 *Pra fazer:* " + " · ".join(tarefas))
+    return "\n".join(L)
+
+
+@app.api_route("/cron/planejamento-semana", methods=["GET", "POST"])
+def cron_planejamento(token: str = ""):
+    if not settings.dashboard_token or token != settings.dashboard_token:
+        return JSONResponse({"erro": "não autorizado"}, status_code=401)
+    try:
+        planilha.sincronizar()
+    except Exception:
+        log.exception("erro sync planilha no planejamento")
+    texto = _planejamento_semana_texto()
+    evolution.enviar_relatorio(texto)
+    return {"enviado": True, "planejamento": texto}
 
 
 @app.api_route("/cron/resumo-semanal", methods=["GET", "POST"])
