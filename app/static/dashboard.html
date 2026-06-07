@@ -68,6 +68,24 @@
     </div>
   </section>
 
+  <section class="grid md:grid-cols-3 gap-4 mb-6">
+    <div class="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
+      <h2 class="font-semibold mb-3">🎯 Conversão (mês)</h2>
+      <p class="text-4xl font-bold text-indigo-400" id="conv_taxa">—</p>
+      <p class="text-slate-400 text-sm mt-1" id="conv_det">—</p>
+    </div>
+    <div class="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
+      <h2 class="font-semibold mb-3">📣 Vendas por canal (mês)</h2>
+      <ul id="lista_canais" class="text-sm divide-y divide-slate-700"></ul>
+    </div>
+    <div class="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
+      <h2 class="font-semibold mb-3">📉 Margem avaliações (mês)</h2>
+      <p class="text-2xl font-bold text-emerald-400" id="marg_media">—</p>
+      <p class="text-slate-400 text-xs mb-2">média abaixo da FIPE · <span id="marg_qtd">0</span> avaliação(ões)</p>
+      <ul id="lista_margem" class="text-xs divide-y divide-slate-700"></ul>
+    </div>
+  </section>
+
   <section class="grid md:grid-cols-2 gap-4 mb-6">
     <div class="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
       <h2 class="font-semibold mb-3">💰 A receber</h2>
@@ -164,6 +182,19 @@ function render(d){
   const box = document.getElementById('box_pend');
   if(d.pendentes_confirmacao>0){ box.textContent='⚠️ '+d.pendentes_confirmacao+' evento(s) aguardando sua confirmação no WhatsApp'; box.classList.remove('hidden'); }
   else box.classList.add('hidden');
+
+  // conversão
+  const cv = d.conversao || {};
+  document.getElementById('conv_taxa').textContent = (cv.taxa_conversao ?? 0) + '%';
+  document.getElementById('conv_det').textContent = (cv.vendidos ?? 0) + ' de ' + (cv.agendamentos ?? 0) + ' agendamentos viraram venda';
+  // vendas por canal
+  const canais = (d.canais && d.canais.canais) || [];
+  lista('lista_canais', canais, x=>`${x.canal} <span class="float-right">${x.quantidade} · ${brl(x.valor_total)}</span>`);
+  // margem avaliações
+  const mg = d.margem || {};
+  document.getElementById('marg_media').textContent = brl(mg.media_abaixo_da_fipe||0);
+  document.getElementById('marg_qtd').textContent = mg.quantidade||0;
+  lista('lista_margem', (mg.itens||[]), x=>`${x.modelo||'—'} <span class="float-right text-slate-400">FIPE ${brl(x.fipe)} → ${brl(x.avaliado)}</span>`);
 
   lista('lista_receber', d.a_receber.itens, x=>{
     const comp = [x.ja_pago?('pago '+brl(x.ja_pago)):'', x.financiado?('financ '+brl(x.financiado)):'', x.troca?('troca '+brl(x.troca)):''].filter(Boolean).join(' · ');

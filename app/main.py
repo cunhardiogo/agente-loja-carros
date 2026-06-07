@@ -110,6 +110,9 @@ def _metrics() -> dict:
         "entregas": consulta.entregas_agendadas("mes"),
         "avaliacoes": consulta.listar_avaliacoes("mes"),
         "vendas_lista": consulta.lista_vendas("tudo"),
+        "canais": consulta.vendas_por_canal("mes"),
+        "conversao": consulta.conversao("mes"),
+        "margem": consulta.margem_avaliacoes("mes"),
         "pendentes_confirmacao": len(pendentes),
     }
 
