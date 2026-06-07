@@ -13,9 +13,34 @@ log = logging.getLogger("agente")
 app = FastAPI(title="Agente Loja de Carros — Grupo SB")
 
 
+import time as _time
+_ult_lembrete = {"t": 0.0}
+
+
+def _disparar_lembretes() -> int:
+    agora = datas.agora().isoformat()
+    rows = db.select("lembretes", {"select": "id,numero,texto", "enviado": "eq.false",
+                                   "quando": f"lte.{agora}"})
+    n = 0
+    for r in rows:
+        try:
+            evolution.enviar_texto(r["numero"], "⏰ Lembrete: " + r["texto"])
+            db.update("lembretes", {"enviado": True}, {"id": f"eq.{r['id']}"})
+            n += 1
+        except Exception:
+            log.exception("erro enviando lembrete")
+    return n
+
+
 @app.api_route("/", methods=["GET", "HEAD"])
 @app.api_route("/health", methods=["GET", "HEAD"])
 def health():
+    try:  # aproveita o ping do UptimeRobot (5 min) p/ disparar lembretes vencidos
+        if _time.time() - _ult_lembrete["t"] > 60:
+            _ult_lembrete["t"] = _time.time()
+            _disparar_lembretes()
+    except Exception:
+        log.exception("erro no check de lembretes")
     return {"ok": True}
 
 
@@ -284,18 +309,7 @@ def cron_semanal(token: str = ""):
 def cron_lembretes(token: str = ""):
     if not settings.dashboard_token or token != settings.dashboard_token:
         return JSONResponse({"erro": "não autorizado"}, status_code=401)
-    agora = datas.agora().isoformat()
-    rows = db.select("lembretes", {"select": "id,numero,texto", "enviado": "eq.false",
-                                   "quando": f"lte.{agora}"})
-    enviados = 0
-    for r in rows:
-        try:
-            evolution.enviar_texto(r["numero"], "⏰ Lembrete: " + r["texto"])
-            db.update("lembretes", {"enviado": True}, {"id": f"eq.{r['id']}"})
-            enviados += 1
-        except Exception:
-            log.exception("erro enviando lembrete")
-    return {"enviados": enviados}
+    return {"enviados": _disparar_lembretes()}
 
 
 @app.api_route("/cron/agenda-manha", methods=["GET", "POST"])
