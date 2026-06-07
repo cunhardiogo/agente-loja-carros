@@ -1,0 +1,15 @@
+name: Agenda da manhã
+
+on:
+  schedule:
+    - cron: "0 12 * * 1-6"   # 09:00 BRT, segunda a sábado
+  workflow_dispatch:
+
+jobs:
+  agenda:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enviar agenda do dia
+        run: |
+          curl -m 180 -fsS \
+            "https://agente-loja-carros.onrender.com/cron/agenda-manha?token=${{ secrets.CRON_TOKEN }}"

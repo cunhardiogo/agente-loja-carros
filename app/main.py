@@ -124,28 +124,90 @@ def dashboard():
         return HTMLResponse(f.read())
 
 
-# ===== Resumo diário (disparado por agendador externo) =====
+# ===== Relatórios diários (disparados por agendador externo) =====
 def _brl(x) -> str:
     return f"R$ {(x or 0):,.0f}".replace(",", ".")
 
 
+def _dm(s: str | None) -> str:
+    return f"{s[8:10]}/{s[5:7]}" if s and len(s) >= 10 else ""
+
+
+def _carro(v: dict) -> str:
+    return " ".join(x for x in (v.get("modelo"), v.get("versao")) if x) or "carro"
+
+
+def _reservado_carro(it: dict) -> str:
+    partes = [p.strip() for p in (it.get("observacoes") or "").split("·")]
+    return partes[2] if len(partes) > 2 and partes[2] else (it.get("cliente_nome") or "—")
+
+
+def _agenda_manha_texto() -> str:
+    hoje = datas.hoje_iso()
+    nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
+    ags = db.select("agendamentos", {"select": "cliente_nome,data_agendada,vendedor_id", "origem": "eq.planilha"})
+    hoje_ags = sorted([a for a in ags if (a.get("data_agendada") or "")[:10] == hoje],
+                      key=lambda a: a.get("data_agendada") or "")
+    def _h(a):
+        d = a.get("data_agendada") or ""
+        return (d[11:16] + "h ") if len(d) >= 16 and d[11:16] != "00:00" else ""
+    ag_txt = ", ".join(f"{a['cliente_nome']} {_h(a)}({nomes.get(a['vendedor_id'], '—')})".replace("  ", " ")
+                       for a in hoje_ags) if hoje_ags else "nenhum"
+
+    vendas = db.select("vendas", {"select": "cliente_nome,modelo,versao,status_entrega,data_entrega_prevista"})
+    pend = [v for v in vendas if v.get("status_entrega") != "entregue"]
+    hoje_ent = [v for v in pend if (v.get("data_entrega_prevista") or "")[:10] == hoje]
+    atras = [v for v in pend if v.get("data_entrega_prevista") and v["data_entrega_prevista"][:10] < hoje]
+    ent_txt = ", ".join(f"{_carro(v)} ({v.get('cliente_nome') or ''})" for v in hoje_ent) if hoje_ent else "nenhuma"
+    atr_txt = ", ".join(f"{_carro(v)} ({v.get('cliente_nome') or ''}, {_dm(v['data_entrega_prevista'])})"
+                        for v in atras) if atras else "nenhuma"
+
+    res = consulta.reservados("mes")
+    res_txt = str(res["quantidade"])
+    if res["quantidade"]:
+        res_txt += " (" + ", ".join(_reservado_carro(i) for i in res["itens"]) + ")"
+
+    linhas = [
+        f"☀️ *Bom dia! Agenda de hoje* ({datas.hoje().strftime('%d/%m')})",
+        f"📅 Agendamentos: {len(hoje_ags)} — {ag_txt}",
+        f"🚗 Entregas marcadas hoje: {ent_txt}",
+        f"⚠️ Atrasadas p/ entregar: {atr_txt}",
+        f"🅿️ Reservados aguardando: {res_txt}",
+    ]
+    if hoje_ent or atras:
+        linhas.append("\n👉 Já entregou alguma? Responde \"entreguei o [carro]\" que eu atualizo.")
+    return "\n".join(linhas)
+
+
 def _resumo_diario_texto() -> str:
-    v = consulta.resumo_vendas("hoje")
-    vend = consulta.vendidos("hoje")
-    ag = consulta.resumo_agendamentos("hoje")
+    hoje = datas.hoje_iso()
+    vh = consulta.vendidos("hoje")
+    vm = consulta.vendidos("mes")
+    fat = consulta.resumo_vendas("mes")
     receber = consulta.pendencias("pagamento")
-    entregar = consulta.entregas_agendadas("hoje")
-    pend = len(db.select("eventos_brutos", {"select": "id", "status": "eq.pendente_confirmacao"}))
+    ag = consulta.resumo_agendamentos("hoje")
+    res = consulta.reservados("mes")
+
+    vendas = db.select("vendas", {"select": "cliente_nome,modelo,versao,status_entrega,data_entrega_real"})
+    feitas = [v for v in vendas if v.get("status_entrega") == "entregue" and (v.get("data_entrega_real") or "")[:10] == hoje]
+    pendentes = [v for v in vendas if v.get("status_entrega") != "entregue"]
+    feitas_txt = f"{len(feitas)} feita" + ("s" if len(feitas) != 1 else "")
+    if feitas:
+        feitas_txt += " (" + ", ".join(_carro(v) for v in feitas) + ")"
+
     linhas = [
         f"📊 *Fechamento de hoje* ({datas.hoje().strftime('%d/%m')})",
-        f"🏆 Vendidos hoje: {vend['quantidade']}",
-        f"💵 Faturamento (c/ valor): {_brl(v['valor_total'])}",
-        f"💰 A receber (total): {_brl(receber['valor_total_a_receber'])}",
-        f"📦 Entregas hoje: {entregar['quantidade']} carro(s)",
-        f"📅 Agendamentos hoje: {ag['total']} (✅ {ag['compareceram']} | ❌ {ag['faltaram']})",
+        f"🏆 Vendidos hoje: {vh['quantidade']} · no mês: {vm['quantidade']}",
+        f"💵 Faturamento do mês: {_brl(fat['valor_total'])}",
+        f"📉 A receber: {_brl(receber['valor_total_a_receber'])}",
+        f"📦 Entregas: {feitas_txt} · {len(pendentes)} pendentes",
+        f"📅 Agendamentos hoje: {ag['total']} (✅ {ag['compareceram']} · ❌ {ag['faltaram']})",
+        f"🅿️ Reservados: {res['quantidade']}",
     ]
-    if pend:
-        linhas.append(f"⚠️ {pend} pendente(s) de confirmação")
+    av = consulta.listar_avaliacoes("hoje")
+    if av["quantidade"]:
+        itens = ", ".join(f"{a.get('modelo', '')} avaliado {_brl(a.get('valor_avaliacao'))}" for a in av["avaliacoes"])
+        linhas.append(f"🔍 Avaliações hoje: {av['quantidade']} ({itens})")
     return "\n".join(linhas)
 
 
@@ -158,6 +220,19 @@ def cron_sync_planilha(token: str = ""):
     except Exception as e:
         log.exception("erro sync planilha")
         return JSONResponse({"erro": str(e)}, status_code=500)
+
+
+@app.api_route("/cron/agenda-manha", methods=["GET", "POST"])
+def cron_agenda(token: str = ""):
+    if not settings.dashboard_token or token != settings.dashboard_token:
+        return JSONResponse({"erro": "não autorizado"}, status_code=401)
+    try:
+        planilha.sincronizar()
+    except Exception:
+        log.exception("erro sync planilha na agenda")
+    texto = _agenda_manha_texto()
+    evolution.notificar_dono(texto)
+    return {"enviado": True, "agenda": texto}
 
 
 @app.api_route("/cron/resumo-diario", methods=["GET", "POST"])
