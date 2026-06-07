@@ -1,0 +1,15 @@
+name: Resumo semanal (domingo)
+
+on:
+  schedule:
+    - cron: "0 21 * * 0"   # 18:00 BRT, domingo
+  workflow_dispatch:
+
+jobs:
+  semanal:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enviar resumo da semana
+        run: |
+          curl -m 180 -fsS \
+            "https://agente-loja-carros.onrender.com/cron/resumo-semanal?token=${{ secrets.CRON_TOKEN }}"

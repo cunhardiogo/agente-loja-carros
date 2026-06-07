@@ -222,6 +222,57 @@ def cron_sync_planilha(token: str = ""):
         return JSONResponse({"erro": str(e)}, status_code=500)
 
 
+def _resumo_semanal_texto() -> str:
+    from datetime import timedelta
+    hoje = datas.hoje()
+    ini = hoje - timedelta(days=hoje.weekday())
+    periodo = f"{ini.strftime('%d/%m')} a {hoje.strftime('%d/%m')}"
+
+    vend = consulta.vendidos("semana")
+    fat = consulta.resumo_vendas("semana")
+    ranking = consulta.ranking_vendedores("semana")["ranking"]
+    receber = consulta.pendencias("pagamento")
+    ag = consulta.resumo_agendamentos("semana")
+    res = consulta.reservados("mes")
+    vlist = consulta.lista_vendas("tudo")
+    estoque = consulta.listar_carros("anunciado")
+
+    linhas = [
+        f"📈 *Resumo da semana* ({periodo})",
+        f"🏆 Vendidos: {vend['quantidade']} · 💵 Faturamento: {_brl(fat['valor_total'])}",
+        f"📉 A receber: {_brl(receber['valor_total_a_receber'])}",
+    ]
+    if ranking:
+        linhas.append("🥇 Vendedores: " + " · ".join(f"{r['vendedor']} {r['quantidade']}" for r in ranking[:5]))
+    linhas.append(f"📅 Agendamentos: {ag['total']} (✅ {ag['compareceram']} · ❌ {ag['faltaram']} · {ag['taxa_comparecimento']}%)")
+
+    focos = []
+    if res["quantidade"]:
+        focos.append(f"🅿️ Resolver {res['quantidade']} reservado(s): " + ", ".join(_reservado_carro(i) for i in res["itens"]))
+    if vlist["a_entregar"]:
+        focos.append(f"📦 Entregar {vlist['a_entregar']} carro(s) pendente(s)")
+    focos.append(f"📸 Anunciar carros (anunciados: {estoque['quantidade']})")
+    focos.append("🔧 Verificar recalls pendentes")
+    if ag["total"] < 5 or ag["taxa_comparecimento"] < 60:
+        focos.append(f"📈 Captação: agendamento/comparecimento baixos ({ag['total']} agend · {ag['taxa_comparecimento']}%)")
+
+    linhas += ["", "🎯 *Focos pra semana:*"] + [f"• {f}" for f in focos]
+    return "\n".join(linhas)
+
+
+@app.api_route("/cron/resumo-semanal", methods=["GET", "POST"])
+def cron_semanal(token: str = ""):
+    if not settings.dashboard_token or token != settings.dashboard_token:
+        return JSONResponse({"erro": "não autorizado"}, status_code=401)
+    try:
+        planilha.sincronizar()
+    except Exception:
+        log.exception("erro sync planilha no semanal")
+    texto = _resumo_semanal_texto()
+    evolution.notificar_dono(texto)
+    return {"enviado": True, "resumo": texto}
+
+
 @app.api_route("/cron/agenda-manha", methods=["GET", "POST"])
 def cron_agenda(token: str = ""):
     if not settings.dashboard_token or token != settings.dashboard_token:
