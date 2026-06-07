@@ -316,6 +316,42 @@ def marcar_anunciado(veiculo: str) -> dict:
     return {"ok": True, "anunciado": f"{r.get('marca','')} {r.get('modelo','')}".strip()}
 
 
+def atualizar_venda(cliente: str | None = None, veiculo: str | None = None, **campos) -> dict:
+    """Edita uma venda existente. Localiza por cliente ou veículo e altera os campos informados."""
+    rows = db.select("vendas", {"select": "id,cliente_nome,modelo,versao"})
+    r = _match(rows, cliente or veiculo, ["cliente_nome", "modelo", "versao"])
+    if not r:
+        return {"erro": f"não achei venda com '{cliente or veiculo}'"}
+    permitidos = {"portal_venda", "valor_venda", "forma_pagamento", "banco", "valor_financiado",
+                  "valor_entrada", "troca_valor", "status_pagamento", "status_entrega",
+                  "data_venda", "data_entrega_prevista", "cliente_nome", "observacoes",
+                  "marca", "modelo", "versao", "ano", "cor", "km", "placa"}
+    set_ = {k: v for k, v in campos.items() if k in permitidos and v is not None}
+    if campos.get("vendedor"):
+        vend = resolver_pessoa(campos["vendedor"], "vendedor")
+        if vend:
+            set_["vendedor_id"] = vend["id"]
+    if not set_:
+        return {"erro": "não entendi o que mudar"}
+    db.update("vendas", set_, {"id": f"eq.{r['id']}"})
+    return {"ok": True, "venda": f"{r['cliente_nome']} — {r.get('modelo','')}".strip(), "alterado": set_}
+
+
+def atualizar_carro(veiculo: str, preco_anuncio: float | None = None, status: str | None = None,
+                    cor: str | None = None, km: int | None = None, ano: int | None = None) -> dict:
+    """Edita um carro do estoque (preço, status, cor, km, ano). Localiza por marca/modelo/versão."""
+    rows = db.select("veiculos", {"select": "id,marca,modelo,versao"})
+    r = _match(rows, veiculo, ["marca", "modelo", "versao"])
+    if not r:
+        return {"erro": f"não achei carro com '{veiculo}'"}
+    set_ = {k: v for k, v in {"preco_anuncio": preco_anuncio, "status": status, "cor": cor,
+                              "km": km, "ano": ano}.items() if v is not None}
+    if not set_:
+        return {"erro": "não entendi o que mudar"}
+    db.update("veiculos", set_, {"id": f"eq.{r['id']}"})
+    return {"ok": True, "carro": f"{r.get('marca','')} {r.get('modelo','')}".strip(), "alterado": set_}
+
+
 def vendas_por_canal(periodo: str = "mes", data_inicio: str | None = None, data_fim: str | None = None) -> dict:
     ini, fim = _resolve(periodo, data_inicio, data_fim)
     rows = [r for r in db.select("vendas", {"select": "portal_venda,valor_venda,data_venda"})
@@ -379,6 +415,8 @@ DISPATCH = {
     "marcar_entregue": marcar_entregue,
     "marcar_pago": marcar_pago,
     "marcar_anunciado": marcar_anunciado,
+    "atualizar_venda": atualizar_venda,
+    "atualizar_carro": atualizar_carro,
     "resumo_vendas": resumo_vendas,
     "ranking_vendedores": ranking_vendedores,
     "listar_carros": listar_carros,
@@ -419,6 +457,29 @@ TOOLS = [
         "name": "marcar_anunciado",
         "description": "AÇÃO: marcar um carro como anunciado (sai da lista 'a anunciar'). Use quando o dono disser que anunciou/publicou.",
         "parameters": {"type": "object", "properties": {"veiculo": {"type": "string"}}, "required": ["veiculo"]},
+    }},
+    {"type": "function", "function": {
+        "name": "atualizar_venda",
+        "description": "AÇÃO: corrigir/editar dados de uma venda existente (canal, valor, vendedor, forma de pagamento, financiado, troca, datas, cliente, status). Ex.: 'a venda do Denilson foi pelo tráfego', 'a do João foi 95 mil', 'a venda do C4 foi o Carlos'.",
+        "parameters": {"type": "object", "properties": {
+            "cliente": {"type": "string", "description": "nome do cliente p/ localizar"},
+            "veiculo": {"type": "string", "description": "modelo/versão p/ localizar"},
+            "portal_venda": {"type": "string"}, "valor_venda": {"type": "number"}, "vendedor": {"type": "string"},
+            "forma_pagamento": {"type": "string"}, "banco": {"type": "string"},
+            "valor_financiado": {"type": "number"}, "valor_entrada": {"type": "number"}, "troca_valor": {"type": "number"},
+            "status_pagamento": {"type": "string", "enum": ["pendente", "parcial", "pago"]},
+            "status_entrega": {"type": "string", "enum": ["pendente", "entregue"]},
+            "data_venda": {"type": "string"}, "data_entrega_prevista": {"type": "string"},
+            "cliente_nome": {"type": "string", "description": "novo nome do cliente (se for corrigir o nome)"},
+            "observacoes": {"type": "string"}}},
+    }},
+    {"type": "function", "function": {
+        "name": "atualizar_carro",
+        "description": "AÇÃO: editar um carro do estoque (preço, status, cor, km, ano). Ex.: 'muda o preço do Corolla pra 135 mil', 'o 208 é prata'.",
+        "parameters": {"type": "object", "properties": {
+            "veiculo": {"type": "string"}, "preco_anuncio": {"type": "number"},
+            "status": {"type": "string", "enum": ["a_anunciar", "anunciado", "reservado", "vendido", "entregue", "inativo"]},
+            "cor": {"type": "string"}, "km": {"type": "integer"}, "ano": {"type": "integer"}}, "required": ["veiculo"]},
     }},
     {"type": "function", "function": {
         "name": "resumo_vendas",
@@ -499,7 +560,10 @@ calcule data_inicio/data_fim em ISO a partir da DATA DE HOJE informada e passe n
 
 ANÁLISES: você tem vendas_por_canal (qual portal vende mais), margem_avaliacoes (FIPE x avaliado), conversao (agendou→vendeu %), historico_cliente (jornada de um cliente).
 
-AÇÕES quando o dono pedir: marcar_entregue, marcar_pago, marcar_anunciado. Confirme em 1 linha o que fez (ou que não encontrou). Nunca invente que fez se a ferramenta der erro.
+AÇÕES quando o dono pedir: marcar_entregue, marcar_pago, marcar_anunciado, e EDITAR registros: atualizar_venda \
+(corrigir canal/valor/vendedor/pagamento/datas/cliente de uma venda — ex 'a venda do Denilson foi pelo tráfego', 'a do João foi 95 mil') \
+e atualizar_carro (preço/status/cor/km do estoque). Confirme em 1 linha o que mudou (ou que não encontrou). Nunca invente se a ferramenta der erro. \
+OBS: agendamento, comparecimento, vendido e reservado vêm da PLANILHA — não dá pra editar por aqui; nesse caso oriente a corrigir na planilha.
 
 ESTILO: curto e direto, em português, valores como R$ 95.000, listas em linhas curtas com emojis discretos. \
 Quando fizer sentido, acrescente UM insight curto (ex.: quem está puxando o mês, alerta de comparecimento/entrega atrasada) — sem encher. \
