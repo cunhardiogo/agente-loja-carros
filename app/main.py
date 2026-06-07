@@ -309,7 +309,9 @@ def cron_semanal(token: str = ""):
 def cron_lembretes(token: str = ""):
     if not settings.dashboard_token or token != settings.dashboard_token:
         return JSONResponse({"erro": "não autorizado"}, status_code=401)
-    return {"enviados": _disparar_lembretes()}
+    agora = datas.agora().isoformat()
+    due = db.select("lembretes", {"select": "id", "enviado": "eq.false", "quando": f"lte.{agora}"})
+    return {"agora": agora, "due": len(due), "enviados": _disparar_lembretes()}
 
 
 @app.api_route("/cron/agenda-manha", methods=["GET", "POST"])
