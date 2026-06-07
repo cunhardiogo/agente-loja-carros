@@ -74,13 +74,6 @@
       <ul id="lista_receber" class="text-sm divide-y divide-slate-700"></ul>
     </div>
     <div class="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
-      <h2 class="font-semibold mb-3">📦 A entregar</h2>
-      <ul id="lista_entregar" class="text-sm divide-y divide-slate-700"></ul>
-    </div>
-  </section>
-
-  <section class="grid md:grid-cols-2 gap-4 mb-6">
-    <div class="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
       <h2 class="font-semibold mb-3">🎁 Próximas entregas (<span id="entregas_qtd">0</span>)</h2>
       <ul id="lista_entregas" class="text-sm divide-y divide-slate-700"></ul>
     </div>
@@ -163,7 +156,6 @@ function render(d){
     const comp = [x.ja_pago?('pago '+brl(x.ja_pago)):'', x.financiado?('financ '+brl(x.financiado)):'', x.troca?('troca '+brl(x.troca)):''].filter(Boolean).join(' · ');
     return `<div class="flex justify-between"><span>${x.cliente_nome||'—'} <span class="text-slate-500">${x.veiculo||''}</span></span><span class="text-amber-400">${brl(x.a_receber)}</span></div>${comp?`<div class="text-xs text-slate-500">vendido ${brl(x.valor_vendido)} · ${comp}</div>`:''}`;
   });
-  lista('lista_entregar', d.a_entregar.itens, x=>`${x.cliente_nome||'—'} <span class="text-slate-400 float-right">${x.data_entrega_prevista||'sem data'}</span>`);
   document.getElementById('entregas_qtd').textContent = d.entregas.quantidade;
   const dm = s => s ? s.slice(8,10)+'/'+s.slice(5,7) : '';
   const hm = s => s ? s.slice(0,5) : '';
