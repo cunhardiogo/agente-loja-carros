@@ -13,9 +13,34 @@ log = logging.getLogger("agente")
 app = FastAPI(title="Agente Loja de Carros — Grupo SB")
 
 
+import threading
 import time as _time
 _ult_lembrete = {"t": 0.0}
 _lojasb_ok = {"v": True}
+
+
+def _tick() -> None:
+    if _time.time() - _ult_lembrete["t"] <= 55:
+        return
+    _ult_lembrete["t"] = _time.time()
+    _disparar_lembretes()
+    _checar_lojasb()
+    _checar_relatorios()
+
+
+def _loop_agendador() -> None:
+    """Always-on (VPS): dispara lembretes/relatórios sozinho, sem depender de ping externo."""
+    while True:
+        _time.sleep(60)
+        try:
+            _tick()
+        except Exception:
+            log.exception("erro no loop agendador")
+
+
+@app.on_event("startup")
+def _start_bg() -> None:
+    threading.Thread(target=_loop_agendador, daemon=True).start()
 
 
 def _checar_lojasb() -> None:
@@ -103,12 +128,8 @@ def _checar_relatorios() -> None:
 @app.api_route("/", methods=["GET", "HEAD"])
 @app.api_route("/health", methods=["GET", "HEAD"])
 def health():
-    try:  # aproveita o ping do UptimeRobot (5 min): lembretes + conexão lojasb + relatórios no horário
-        if _time.time() - _ult_lembrete["t"] > 60:
-            _ult_lembrete["t"] = _time.time()
-            _disparar_lembretes()
-            _checar_lojasb()
-            _checar_relatorios()
+    try:
+        _tick()  # mesmo ciclo do loop interno (compartilham o throttle de 60s)
     except Exception:
         log.exception("erro no check periódico")
     return {"ok": True}
