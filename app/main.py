@@ -57,14 +57,58 @@ def _disparar_lembretes() -> int:
     return n
 
 
+def _ja_enviado(tipo: str, data: str) -> bool:
+    return bool(db.select("relatorios_enviados", {"select": "tipo", "tipo": f"eq.{tipo}",
+                                                  "data": f"eq.{data}", "limit": "1"}))
+
+
+def _marcar_enviado(tipo: str, data: str) -> None:
+    try:
+        db.insert("relatorios_enviados", {"tipo": tipo, "data": data})
+    except Exception:
+        pass
+
+
+def _checar_relatorios() -> None:
+    """Dispara os relatórios no horário certo (independente do GitHub Actions)."""
+    now = datas.agora()
+    hhmm = now.strftime("%H:%M")
+    dow = now.weekday()  # 0=segunda ... 6=domingo
+    hoje = now.date().isoformat()
+    jobs = []
+    if dow == 0 and hhmm >= "08:00":
+        jobs.append(("planejamento", _planejamento_semana_texto))
+    if dow <= 5 and hhmm >= "09:00":
+        jobs.append(("agenda", _agenda_manha_texto))
+    if dow <= 4 and hhmm >= "18:00":
+        jobs.append(("fechamento", _resumo_diario_texto))
+    if dow == 5 and hhmm >= "15:00":
+        jobs.append(("fechamento", _resumo_diario_texto))
+    if dow == 6 and hhmm >= "18:00":
+        jobs.append(("semanal", _resumo_semanal_texto))
+    for tipo, fn in jobs:
+        if _ja_enviado(tipo, hoje):
+            continue
+        try:
+            try:
+                planilha.sincronizar()
+            except Exception:
+                pass
+            evolution.enviar_relatorio(fn())
+            _marcar_enviado(tipo, hoje)
+        except Exception:
+            log.exception("erro enviando relatório %s", tipo)
+
+
 @app.api_route("/", methods=["GET", "HEAD"])
 @app.api_route("/health", methods=["GET", "HEAD"])
 def health():
-    try:  # aproveita o ping do UptimeRobot (5 min): dispara lembretes + checa conexão do lojasb
+    try:  # aproveita o ping do UptimeRobot (5 min): lembretes + conexão lojasb + relatórios no horário
         if _time.time() - _ult_lembrete["t"] > 60:
             _ult_lembrete["t"] = _time.time()
             _disparar_lembretes()
             _checar_lojasb()
+            _checar_relatorios()
     except Exception:
         log.exception("erro no check periódico")
     return {"ok": True}

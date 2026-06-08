@@ -1,9 +1,7 @@
 name: Resumo semanal (domingo)
 
 on:
-  schedule:
-    - cron: "0 21 * * 0"   # 18:00 BRT, domingo
-  workflow_dispatch:
+  workflow_dispatch:   # automático agora é pelo próprio app (/_checar_relatorios)
 
 jobs:
   semanal:

@@ -1,9 +1,7 @@
 name: Planejamento da semana (segunda)
 
 on:
-  schedule:
-    - cron: "0 11 * * 1"   # 08:00 BRT, segunda (antes da agenda das 9h)
-  workflow_dispatch:
+  workflow_dispatch:   # automático agora é pelo próprio app (/_checar_relatorios)
 
 jobs:
   planejamento:

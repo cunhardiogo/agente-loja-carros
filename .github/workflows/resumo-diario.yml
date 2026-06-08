@@ -1,10 +1,7 @@
 name: Resumo diário
 
 on:
-  schedule:
-    - cron: "0 21 * * 1-5"   # 18:00 BRT, segunda a sexta
-    - cron: "0 18 * * 6"     # 15:00 BRT, sábado
-  workflow_dispatch:        # permite disparar manualmente pra testar
+  workflow_dispatch:   # automático agora é pelo próprio app (/_checar_relatorios)        # permite disparar manualmente pra testar
 
 jobs:
   resumo:

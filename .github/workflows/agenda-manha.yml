@@ -1,9 +1,7 @@
 name: Agenda da manhã
 
 on:
-  schedule:
-    - cron: "0 12 * * 1-6"   # 09:00 BRT, segunda a sábado
-  workflow_dispatch:
+  workflow_dispatch:   # automático agora é pelo próprio app (/_checar_relatorios)
 
 jobs:
   agenda:
