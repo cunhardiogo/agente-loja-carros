@@ -16,6 +16,7 @@ app = FastAPI(title="Agente Loja de Carros — Grupo SB")
 import threading
 import time as _time
 _ult_lembrete = {"t": 0.0}
+_ult_planilha = {"t": 0.0}
 _lojasb_ok = {"v": True}
 
 
@@ -26,6 +27,12 @@ def _tick() -> None:
     _disparar_lembretes()
     _checar_lojasb()
     _checar_relatorios()
+    if _time.time() - _ult_planilha["t"] > 600:  # sync da planilha a cada ~10 min
+        _ult_planilha["t"] = _time.time()
+        try:
+            planilha.sincronizar()
+        except Exception:
+            log.exception("erro sync planilha no loop")
 
 
 def _loop_agendador() -> None:
@@ -132,7 +139,7 @@ def health():
         _tick()  # mesmo ciclo do loop interno (compartilham o throttle de 60s)
     except Exception:
         log.exception("erro no check periódico")
-    return {"ok": True}
+    return {"ok": True, "agora": datas.agora().strftime("%Y-%m-%d %H:%M:%S %Z")}
 
 
 @app.post("/webhook/evolution")

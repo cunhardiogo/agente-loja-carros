@@ -10,4 +10,4 @@ jobs:
       - name: Enviar resumo da semana
         run: |
           curl -m 180 -fsS \
-            "https://agente-loja-carros.onrender.com/cron/resumo-semanal?token=${{ secrets.CRON_TOKEN }}"
+            "https://agente.agenteintel.com.br/cron/resumo-semanal?token=${{ secrets.CRON_TOKEN }}"

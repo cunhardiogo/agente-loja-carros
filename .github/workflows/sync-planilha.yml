@@ -12,4 +12,4 @@ jobs:
       - name: Sincronizar agendamentos da planilha
         run: |
           curl -m 180 -fsS \
-            "https://agente-loja-carros.onrender.com/cron/sync-planilha?token=${{ secrets.CRON_TOKEN }}"
+            "https://agente.agenteintel.com.br/cron/sync-planilha?token=${{ secrets.CRON_TOKEN }}"

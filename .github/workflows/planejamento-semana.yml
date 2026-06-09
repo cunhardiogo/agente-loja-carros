@@ -10,4 +10,4 @@ jobs:
       - name: Enviar planejamento da semana
         run: |
           curl -m 180 -fsS \
-            "https://agente-loja-carros.onrender.com/cron/planejamento-semana?token=${{ secrets.CRON_TOKEN }}"
+            "https://agente.agenteintel.com.br/cron/planejamento-semana?token=${{ secrets.CRON_TOKEN }}"
