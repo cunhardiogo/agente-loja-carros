@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime, timedelta
 
 import httpx
@@ -8,6 +9,7 @@ from . import datas, db
 from .config import settings
 from .ingest import resolver_pessoa
 
+log = logging.getLogger("agente")
 _http = httpx.Client(verify=settings.verify_ssl, timeout=60)
 _client = OpenAI(api_key=settings.openai_api_key, http_client=_http) if settings.openai_api_key else None
 
@@ -633,25 +635,78 @@ def _system_dinamico() -> str:
     return SYSTEM + f"\n\nDATA E HORA DE HOJE (horário de Brasília): {h.strftime('%Y-%m-%d %H:%M')} ({dias[h.weekday()]})."
 
 
-def carregar_historico(numero: str, limite: int = 6) -> list:
+_MEM_TURNOS = 20      # mensagens recentes mantidas na íntegra
+_MEM_TRUNC = 2000     # corte por mensagem (evita estourar contexto com dump de tool/imagem)
+_MEM_COMPACTAR = 30   # acima disso, comprime as antigas num resumo rolante
+
+
+def _trunc(s: str | None) -> str:
+    s = s or ""
+    return s if len(s) <= _MEM_TRUNC else s[:_MEM_TRUNC] + " …"
+
+
+def carregar_historico(numero: str, limite: int = _MEM_TURNOS) -> list:
     rows = db.select("conversas", {"select": "papel,conteudo", "numero": f"eq.{numero}",
+                                   "papel": "in.(user,assistant)",
                                    "order": "created_at.desc", "limit": str(limite)})
     rows.reverse()
-    return [{"role": r["papel"], "content": r["conteudo"]} for r in rows]
+    return [{"role": r["papel"], "content": _trunc(r["conteudo"])} for r in rows]
+
+
+def carregar_resumo(numero: str) -> str:
+    rows = db.select("conversas", {"select": "conteudo", "numero": f"eq.{numero}",
+                                   "papel": "eq.resumo", "order": "created_at.desc", "limit": "1"})
+    return rows[0]["conteudo"] if rows else ""
 
 
 def salvar_conversa(numero: str, papel: str, conteudo: str) -> None:
     try:
-        db.insert("conversas", {"numero": numero, "papel": papel, "conteudo": conteudo})
+        db.insert("conversas", {"numero": numero, "papel": papel, "conteudo": _trunc(conteudo)})
     except Exception:
         pass
+    if papel == "assistant":  # fim de um turno → tenta compactar a memória antiga
+        try:
+            _compactar_memoria(numero)
+        except Exception:
+            log.exception("erro compactando memória")
+
+
+def _compactar_memoria(numero: str) -> None:
+    if _client is None:
+        return
+    msgs = db.select_all("conversas", {"select": "id,papel,conteudo,created_at", "numero": f"eq.{numero}",
+                                       "papel": "in.(user,assistant)", "order": "created_at.asc"})
+    if len(msgs) <= _MEM_COMPACTAR:
+        return
+    antigas = msgs[:-_MEM_TURNOS]  # tudo além das 20 recentes vira resumo
+    if not antigas:
+        return
+    prev = carregar_resumo(numero)
+    texto = "\n".join(f"{m['papel']}: {_trunc(m['conteudo'])}" for m in antigas)
+    resp = _client.chat.completions.create(
+        model=settings.openai_model_consulta, temperature=0,
+        messages=[{"role": "system", "content": "Resuma de forma compacta o contexto desta conversa entre o "
+                   "dono da loja e o assistente, preservando fatos, números, decisões e pendências citadas. "
+                   "Máximo 1200 caracteres."},
+                  {"role": "user", "content": (f"Resumo anterior:\n{prev}\n\n" if prev else "") + "Mensagens:\n" + texto}])
+    novo = resp.choices[0].message.content or prev
+    db.delete("conversas", {"numero": f"eq.{numero}", "papel": "eq.resumo"})
+    db.insert("conversas", {"numero": numero, "papel": "resumo", "conteudo": novo[:_MEM_TRUNC]})
+    ids = [m["id"] for m in antigas]
+    for i in range(0, len(ids), 100):
+        lote = ids[i:i + 100]
+        db.delete("conversas", {"numero": f"eq.{numero}", "id": f"in.({','.join(lote)})"})
 
 
 def responder(pergunta: str, historico: list | None = None, numero: str | None = None) -> str:
     if _client is None:
         return "IA não configurada (falta OPENAI_API_KEY)."
     _ctx["numero"] = numero
-    messages = [{"role": "system", "content": _system_dinamico()}]
+    sistema = _system_dinamico()
+    resumo = carregar_resumo(numero) if numero else ""
+    if resumo:
+        sistema += f"\n\nRESUMO DA CONVERSA ATÉ AQUI:\n{resumo}"
+    messages = [{"role": "system", "content": sistema}]
     messages += historico or []
     messages.append({"role": "user", "content": pergunta})
     for _ in range(5):
