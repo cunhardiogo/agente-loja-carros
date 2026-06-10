@@ -60,15 +60,34 @@ def ja_processada(message_id: str | None) -> bool:
     return bool(db.select("eventos_brutos", {"message_id": f"eq.{message_id}", "limit": "1"}))
 
 
-def _venda_duplicada(cliente: str | None) -> bool:
-    if not cliente:
-        return False
+def _veiculo_casa(ext: Extracao, r: dict) -> bool:
+    """True se o veículo da extração bate com o da venda r (placa ou tokens de modelo/versão)."""
+    if ext.placa and r.get("placa") and \
+            _norm(ext.placa).replace("-", "") == _norm(r.get("placa")).replace("-", ""):
+        return True
+    termos = " ".join(t for t in (ext.veiculo_descricao, ext.modelo, ext.versao) if t)
+    toks = [_norm(x).replace("-", "") for x in termos.split() if len(x) >= 3 or any(c.isdigit() for c in x)]
+    alvo = _norm(f"{r.get('modelo', '')} {r.get('versao', '')}").replace("-", "")
+    return any(tok and tok in alvo for tok in toks)
+
+
+def _venda_existente(ext: Extracao) -> dict | None:
+    """Venda já registrada do MESMO cliente E mesmo veículo nas últimas 48h.
+    Diferente de antes (só cliente): exige bater o veículo, evitando descartar
+    o cliente que compra dois carros. Sem info de veículo, cai pro cliente."""
+    if not ext.cliente_nome:
+        return None
     desde = (datas.agora() - timedelta(hours=48)).isoformat()
     rows = db.select("vendas", {
-        "select": "id", "cliente_nome": db.ilike(cliente),
-        "created_at": f"gte.{desde}", "limit": "1",
+        "select": "id,cliente_nome,modelo,versao,placa", "cliente_nome": db.ilike(ext.cliente_nome),
+        "created_at": f"gte.{desde}", "order": "created_at.desc",
     })
-    return bool(rows)
+    for r in rows:
+        if _veiculo_casa(ext, r):
+            return r
+    if rows and not (ext.placa or ext.modelo or ext.versao or ext.veiculo_descricao):
+        return rows[0]  # cliente bate e não há veículo pra comparar → trata como possível dup
+    return None
 
 
 def _venda_pendente(ext: Extracao, campo_status: str) -> dict | None:
@@ -113,12 +132,13 @@ def _agendamento_recente(cliente: str | None) -> dict | None:
 
 
 # ===== ações (INSERT/UPDATE). Retornam (tabela, registro_id). =====
-def aplicar(ext: Extracao) -> tuple[str | None, str | None]:
+def aplicar(ext: Extracao, forcar_venda: bool = False) -> tuple[str | None, str | None]:
     t = ext.tipo_evento
 
     if t == TipoEvento.venda:
-        if _venda_duplicada(ext.cliente_nome):
-            return "duplicada", None
+        existente = None if forcar_venda else _venda_existente(ext)
+        if existente:
+            return "duplicada", existente["id"]
         vend = resolver_pessoa(ext.vendedor_nome, "vendedor")
         row = db.insert("vendas", {
             "vendedor_id": vend["id"] if vend else None,
@@ -249,6 +269,13 @@ def codigo_pendencia(evento_id: str) -> str:
     return (evento_id or "").replace("-", "")[:4].upper()
 
 
+def _pergunta_duplicada(ext: Extracao, codigo: str) -> str:
+    veic = ext.veiculo_descricao or " ".join(x for x in (ext.modelo, ext.versao) if x) or "veículo"
+    return (f"⚠️ Já existe venda de *{ext.cliente_nome}* ({veic}) nas últimas 48h. [#{codigo}]\n"
+            f"É a MESMA venda (ignorar) ou uma venda NOVA?\n\n"
+            f"Responda: *{codigo} sim* (é nova, registrar) / *{codigo} não* (ignorar)")
+
+
 def _pergunta_confirmacao(ext: Extracao, codigo: str | None = None) -> str:
     tag = f" [#{codigo}]" if codigo else ""
     instr = (f"Responda: *{codigo} sim* / *{codigo} não* / *{codigo} corrige ...*"
@@ -316,7 +343,9 @@ def _executar(evento_id: str, grupo: dict, texto: str) -> dict:
     else:
         tabela, registro_id = aplicar(ext)
         if tabela == "duplicada":
-            tabela, status = None, "descartado"
+            # nunca descarta calado: pergunta se é a mesma venda ou uma nova
+            tabela, registro_id, status = None, None, "pendente_confirmacao"
+            evolution.notificar_dono(_pergunta_duplicada(ext, codigo))
         elif registro_id:
             status = "auto"
         else:

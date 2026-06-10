@@ -50,7 +50,8 @@ def listar_pendencias() -> str:
 
 def _aplicar_sim(ev: dict) -> str:
     ext = Extracao(**ev["dados_extraidos"])
-    tabela, rid = ingest.aplicar(ext)
+    # dono confirmou: se foi flag de venda duplicada, força o registro
+    tabela, rid = ingest.aplicar(ext, forcar_venda=True)
     db.update("eventos_brutos",
               {"status": "confirmado" if rid else "descartado", "registro_tabela": tabela, "registro_id": rid},
               {"id": f"eq.{ev['id']}"})
