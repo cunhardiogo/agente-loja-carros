@@ -65,7 +65,7 @@ def _venda_duplicada(cliente: str | None) -> bool:
         return False
     desde = (datas.agora() - timedelta(hours=48)).isoformat()
     rows = db.select("vendas", {
-        "select": "id", "cliente_nome": f"ilike.*{cliente}*",
+        "select": "id", "cliente_nome": db.ilike(cliente),
         "created_at": f"gte.{desde}", "limit": "1",
     })
     return bool(rows)
@@ -106,7 +106,7 @@ def _agendamento_recente(cliente: str | None) -> dict | None:
     if not cliente:
         return None
     rows = db.select("agendamentos", {
-        "select": "id,cliente_nome", "cliente_nome": f"ilike.*{cliente}*",
+        "select": "id,cliente_nome", "cliente_nome": db.ilike(cliente),
         "order": "data_agendada.desc.nullslast", "limit": "1",
     })
     return rows[0] if rows else None
@@ -204,7 +204,7 @@ def aplicar(ext: Extracao) -> tuple[str | None, str | None]:
         if not alvo:
             return None, None
         rows = db.select("veiculos", {"select": "id", "status": "eq.a_anunciar",
-                                      "modelo": f"ilike.*{alvo}*", "order": "created_at.desc", "limit": "1"})
+                                      "modelo": db.ilike(alvo), "order": "created_at.desc", "limit": "1"})
         if not rows:
             return None, None
         db.update("veiculos", {"status": "anunciado"}, {"id": f"eq.{rows[0]['id']}"})

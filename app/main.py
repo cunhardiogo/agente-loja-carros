@@ -297,7 +297,7 @@ def _reservado_carro(it: dict) -> str:
 def _agenda_manha_texto() -> str:
     hoje = datas.hoje_iso()
     nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
-    ags = db.select("agendamentos", {"select": "cliente_nome,data_agendada,vendedor_id", "origem": "eq.planilha"})
+    ags = db.select_all("agendamentos", {"select": "cliente_nome,data_agendada,vendedor_id", "origem": "eq.planilha"})
     hoje_ags = sorted([a for a in ags if (a.get("data_agendada") or "")[:10] == hoje],
                       key=lambda a: a.get("data_agendada") or "")
     def _h(a):
@@ -306,7 +306,7 @@ def _agenda_manha_texto() -> str:
     ag_txt = ", ".join(f"{a['cliente_nome']} {_h(a)}({nomes.get(a['vendedor_id'], '—')})".replace("  ", " ")
                        for a in hoje_ags) if hoje_ags else "nenhum"
 
-    vendas = db.select("vendas", {"select": "cliente_nome,modelo,versao,status_entrega,data_entrega_prevista"})
+    vendas = db.select_all("vendas", {"select": "cliente_nome,modelo,versao,status_entrega,data_entrega_prevista"})
     pend = [v for v in vendas if v.get("status_entrega") != "entregue"]
     hoje_ent = [v for v in pend if (v.get("data_entrega_prevista") or "")[:10] == hoje]
     atras = [v for v in pend if v.get("data_entrega_prevista") and v["data_entrega_prevista"][:10] < hoje]
@@ -341,7 +341,7 @@ def _resumo_diario_texto() -> str:
     res = consulta.reservados("mes")
 
     nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
-    vendas = db.select("vendas", {"select": "cliente_nome,modelo,versao,valor_venda,vendedor_id,"
+    vendas = db.select_all("vendas", {"select": "cliente_nome,modelo,versao,valor_venda,vendedor_id,"
                                   "data_venda,status_entrega,data_entrega_real"})
     vendas_hoje = [v for v in vendas if (v.get("data_venda") or "")[:10] == hoje]
     feitas = [v for v in vendas if v.get("status_entrega") == "entregue" and (v.get("data_entrega_real") or "")[:10] == hoje]

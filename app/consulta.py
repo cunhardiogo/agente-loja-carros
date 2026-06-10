@@ -77,7 +77,7 @@ def resumo_vendas(periodo: str = "mes", vendedor: str | None = None,
         vid = v["id"] if v else None
         if vendedor and not vid:
             return {"erro": f"Vendedor '{vendedor}' não encontrado no cadastro."}
-    rows = db.select("vendas", {"select": "valor_venda,data_venda,vendedor_id,over_valor"})
+    rows = db.select_all("vendas", {"select": "valor_venda,data_venda,vendedor_id,over_valor"})
     rows = [r for r in rows if _dentro(r.get("data_venda"), ini, fim) and (not vid or r.get("vendedor_id") == vid)]
     total = sum((r.get("valor_venda") or 0) for r in rows)
     over = sum(_num(r.get("over_valor")) for r in rows)
@@ -92,7 +92,7 @@ def resumo_vendas(periodo: str = "mes", vendedor: str | None = None,
 def ranking_vendedores(periodo: str = "mes", data_inicio: str | None = None, data_fim: str | None = None) -> dict:
     ini, fim = _resolve(periodo, data_inicio, data_fim)
     nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
-    rows = db.select("vendas", {"select": "valor_venda,data_venda,vendedor_id"})
+    rows = db.select_all("vendas", {"select": "valor_venda,data_venda,vendedor_id"})
     rows = [r for r in rows if _dentro(r.get("data_venda"), ini, fim)]
     agg: dict = {}
     for r in rows:
@@ -116,7 +116,7 @@ def listar_carros(status: str = "anunciado") -> dict:
 
 def pendencias(tipo: str) -> dict:
     if tipo == "pagamento":
-        rows = db.select("vendas", {
+        rows = db.select_all("vendas", {
             "select": "cliente_nome,valor_venda,valor_total,valor_entrada,valor_financiado,troca_valor,"
                       "status_pagamento,status_entrega,modelo,versao",
             "order": "data_venda.asc.nullsfirst",
@@ -139,7 +139,7 @@ def pendencias(tipo: str) -> dict:
                 "a_receber": saldo,
             })
         return {"tipo": "pagamento", "quantidade": len(itens), "valor_total_a_receber": total, "itens": itens}
-    rows = db.select("vendas", {
+    rows = db.select_all("vendas", {
         "select": "cliente_nome,valor_venda,data_entrega_prevista,observacoes",
         "status_entrega": "eq.pendente",
         "order": "data_entrega_prevista.asc.nullsfirst",
@@ -150,7 +150,7 @@ def pendencias(tipo: str) -> dict:
 def resumo_agendamentos(periodo: str = "semana", compareceu: bool | None = None,
                         data_inicio: str | None = None, data_fim: str | None = None) -> dict:
     ini, fim = _resolve(periodo, data_inicio, data_fim)
-    rows = db.select("agendamentos", {"select": "cliente_nome,data_agendada,compareceu"})
+    rows = db.select_all("agendamentos", {"select": "cliente_nome,data_agendada,compareceu"})
     rows = [r for r in rows if _dentro(r.get("data_agendada"), ini, fim)]
     total = len(rows)
     vieram = sum(1 for r in rows if r.get("compareceu") is True)
@@ -188,7 +188,7 @@ def listar_agendamentos(periodo: str = "hoje") -> dict:
     """Lista detalhada de agendamentos (cliente, horário, vendedor, status) num período."""
     ini, fim = _range_ag(periodo)
     nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
-    rows = db.select("agendamentos", {"select": "cliente_nome,data_agendada,vendedor_id,resultado,compareceu",
+    rows = db.select_all("agendamentos", {"select": "cliente_nome,data_agendada,vendedor_id,resultado,compareceu",
                                       "origem": "eq.planilha"})
     rows = [r for r in rows if _dentro(r.get("data_agendada"), ini, fim)]
     rows.sort(key=lambda r: r.get("data_agendada") or "")
@@ -206,7 +206,7 @@ def listar_agendamentos(periodo: str = "hoje") -> dict:
 def vendidos(periodo: str = "mes", data_inicio: str | None = None, data_fim: str | None = None) -> dict:
     """Quantos carros VENDIDOS no período, segundo a planilha (Status=VENDIDO)."""
     ini, fim = _resolve(periodo, data_inicio, data_fim)
-    rows = db.select("agendamentos", {"select": "cliente_nome,data_agendada,resultado,observacoes",
+    rows = db.select_all("agendamentos", {"select": "cliente_nome,data_agendada,resultado,observacoes",
                                       "origem": "eq.planilha"})
     rows = [r for r in rows if (r.get("resultado") or "").strip().lower() == "vendido"
             and _dentro(r.get("data_agendada"), ini, fim)]
@@ -230,7 +230,7 @@ def _range_futuro(periodo: str | None):
 def reservados(periodo: str = "mes") -> dict:
     """Quantos carros RESERVADOS no período, segundo a planilha (Status=Reservado)."""
     ini, fim = _range(periodo)
-    rows = db.select("agendamentos", {"select": "cliente_nome,data_agendada,resultado,observacoes",
+    rows = db.select_all("agendamentos", {"select": "cliente_nome,data_agendada,resultado,observacoes",
                                       "origem": "eq.planilha"})
     rows = [r for r in rows if (r.get("resultado") or "").strip().lower().startswith("reservad")
             and _dentro(r.get("data_agendada"), ini, fim)]
@@ -240,7 +240,7 @@ def reservados(periodo: str = "mes") -> dict:
 def entregas_agendadas(periodo: str = "mes") -> dict:
     ini, fim = _range_futuro(periodo)  # entregas são futuras: olha pra frente
     nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
-    rows = db.select("entregas", {
+    rows = db.select_all("entregas", {
         "select": "veiculo,data_entrega,horario,vendedor_id,observacao,status",
         "order": "data_entrega.asc.nullslast",
     })
@@ -253,7 +253,7 @@ def entregas_agendadas(periodo: str = "mes") -> dict:
 def lista_vendas(periodo: str = "tudo") -> dict:
     """Lista as vendas com status de entrega/pagamento (controle do que falta entregar)."""
     ini, fim = _range(periodo)
-    rows = db.select("vendas", {
+    rows = db.select_all("vendas", {
         "select": "cliente_nome,modelo,versao,placa,valor_venda,data_venda,"
                   "status_entrega,status_pagamento,data_entrega_prevista,data_entrega_real",
         "order": "data_venda.desc.nullslast",
@@ -266,7 +266,7 @@ def lista_vendas(periodo: str = "tudo") -> dict:
 
 def listar_avaliacoes(periodo: str = "mes") -> dict:
     ini, fim = _range(periodo)
-    rows = db.select("avaliacoes", {
+    rows = db.select_all("avaliacoes", {
         "select": "modelo,versao,ano,km,placa,fipe,valor_pretendido,valor_avaliacao,"
                   "carro_interesse,obs,created_at",
         "order": "created_at.desc",
@@ -287,7 +287,7 @@ def _match(rows, termo, campos):
 
 
 def marcar_entregue(cliente: str | None = None, veiculo: str | None = None) -> dict:
-    rows = [r for r in db.select("vendas", {"select": "id,cliente_nome,modelo,versao,status_entrega"})
+    rows = [r for r in db.select_all("vendas", {"select": "id,cliente_nome,modelo,versao,status_entrega"})
             if r.get("status_entrega") != "entregue"]
     r = _match(rows, cliente or veiculo, ["cliente_nome", "modelo", "versao"])
     if not r:
@@ -299,7 +299,7 @@ def marcar_entregue(cliente: str | None = None, veiculo: str | None = None) -> d
 
 
 def marcar_pago(cliente: str | None = None, veiculo: str | None = None) -> dict:
-    rows = [r for r in db.select("vendas", {"select": "id,cliente_nome,modelo,versao,status_pagamento"})
+    rows = [r for r in db.select_all("vendas", {"select": "id,cliente_nome,modelo,versao,status_pagamento"})
             if r.get("status_pagamento") != "pago"]
     r = _match(rows, cliente or veiculo, ["cliente_nome", "modelo", "versao"])
     if not r:
@@ -320,7 +320,7 @@ def marcar_anunciado(veiculo: str) -> dict:
 
 def atualizar_venda(cliente: str | None = None, veiculo: str | None = None, **campos) -> dict:
     """Edita uma venda existente. Localiza por cliente ou veículo e altera os campos informados."""
-    rows = db.select("vendas", {"select": "id,cliente_nome,modelo,versao"})
+    rows = db.select_all("vendas", {"select": "id,cliente_nome,modelo,versao"})
     r = _match(rows, cliente or veiculo, ["cliente_nome", "modelo", "versao"])
     if not r:
         return {"erro": f"não achei venda com '{cliente or veiculo}'"}
@@ -385,7 +385,7 @@ def atualizar_carro(veiculo: str, preco_anuncio: float | None = None, status: st
 
 def vendas_por_canal(periodo: str = "mes", data_inicio: str | None = None, data_fim: str | None = None) -> dict:
     ini, fim = _resolve(periodo, data_inicio, data_fim)
-    rows = [r for r in db.select("vendas", {"select": "portal_venda,valor_venda,data_venda"})
+    rows = [r for r in db.select_all("vendas", {"select": "portal_venda,valor_venda,data_venda"})
             if _dentro(r.get("data_venda"), ini, fim)]
     agg: dict = {}
     for r in rows:
@@ -398,7 +398,7 @@ def vendas_por_canal(periodo: str = "mes", data_inicio: str | None = None, data_
 
 def margem_avaliacoes(periodo: str = "mes", data_inicio: str | None = None, data_fim: str | None = None) -> dict:
     ini, fim = _resolve(periodo, data_inicio, data_fim)
-    rows = [r for r in db.select("avaliacoes", {"select": "modelo,fipe,valor_avaliacao,valor_pretendido,created_at"})
+    rows = [r for r in db.select_all("avaliacoes", {"select": "modelo,fipe,valor_avaliacao,valor_pretendido,created_at"})
             if _dentro(r.get("created_at"), ini, fim)]
     itens, difs = [], []
     for r in rows:
@@ -415,7 +415,7 @@ def margem_avaliacoes(periodo: str = "mes", data_inicio: str | None = None, data
 def conversao(periodo: str = "mes", data_inicio: str | None = None, data_fim: str | None = None) -> dict:
     """Taxa de conversão: dos agendamentos da planilha no período, quantos viraram VENDIDO."""
     ini, fim = _resolve(periodo, data_inicio, data_fim)
-    rows = [r for r in db.select("agendamentos", {"select": "resultado,data_agendada", "origem": "eq.planilha"})
+    rows = [r for r in db.select_all("agendamentos", {"select": "resultado,data_agendada", "origem": "eq.planilha"})
             if _dentro(r.get("data_agendada"), ini, fim)]
     total = len(rows)
     vendidos_n = sum(1 for r in rows if (r.get("resultado") or "").strip().lower() == "vendido")
@@ -427,10 +427,10 @@ def historico_cliente(nome: str) -> dict:
     n = (nome or "").strip()
     if not n:
         return {"erro": "diga o nome do cliente"}
-    ag = db.select("agendamentos", {"select": "cliente_nome,data_agendada,resultado,observacoes",
-                                    "cliente_nome": f"ilike.*{n}*", "origem": "eq.planilha"})
-    vd = db.select("vendas", {"select": "cliente_nome,modelo,versao,valor_venda,data_venda,"
-                              "status_entrega,status_pagamento,portal_venda", "cliente_nome": f"ilike.*{n}*"})
+    ag = db.select_all("agendamentos", {"select": "cliente_nome,data_agendada,resultado,observacoes",
+                                    "cliente_nome": db.ilike(n), "origem": "eq.planilha"})
+    vd = db.select_all("vendas", {"select": "cliente_nome,modelo,versao,valor_venda,data_venda,"
+                              "status_entrega,status_pagamento,portal_venda", "cliente_nome": db.ilike(n)})
     return {"cliente": n, "agendamentos": ag, "vendas": vd,
             "encontrou": bool(ag or vd)}
 

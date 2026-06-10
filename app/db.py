@@ -11,10 +11,43 @@ _headers = {
 _client = httpx.Client(base_url=_base, headers=_headers, verify=settings.verify_ssl, timeout=30)
 
 
+def _esc(valor) -> str:
+    """Escapa um valor para filtro PostgREST: envolve em aspas (neutraliza ,.:()*)
+    e escapa \\ e " internos. Use via ilike()/eq_text() para evitar injeção de filtro."""
+    return str(valor).replace("\\", "\\\\").replace('"', '\\"')
+
+
+def ilike(valor: str) -> str:
+    """Valor de filtro `ilike.*termo*` seguro (termo entre aspas, wildcards fora)."""
+    return f'ilike."*{_esc(valor)}*"'
+
+
+def eq_text(valor) -> str:
+    """Valor de filtro `eq."..."` seguro para texto vindo de usuário/extração."""
+    return f'eq."{_esc(valor)}"'
+
+
 def select(table: str, params: dict | None = None) -> list[dict]:
     r = _client.get(f"/{table}", params=params or {})
     r.raise_for_status()
     return r.json()
+
+
+def select_all(table: str, params: dict | None = None, page: int = 1000) -> list[dict]:
+    """Como select(), mas pagina via header Range até esgotar (PostgREST limita ~1000/req)."""
+    base = dict(params or {})
+    out: list[dict] = []
+    offset = 0
+    while True:
+        r = _client.get(f"/{table}", params=base,
+                        headers={"Range-Unit": "items", "Range": f"{offset}-{offset + page - 1}"})
+        r.raise_for_status()
+        batch = r.json()
+        out.extend(batch)
+        if len(batch) < page:
+            break
+        offset += page
+    return out
 
 
 def insert(table: str, data: dict) -> dict:
