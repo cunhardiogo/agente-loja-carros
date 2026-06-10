@@ -23,15 +23,15 @@ troca (troca_modelo, troca_placa, troca_valor), ipva (cliente/loja), beneficios,
 - avaliacao: formulário "Avaliações" de um carro (pra troca/compra). Capture loja, modelo, combustivel, ano, km, placa, \
 checklist (ar_condicionado, gelando, buzina, limpador, luz_painel, chave_reserva, revisado = true/false a partir de (X)Sim/(X)Não), \
 revisao, pecas_qtd, pecas_obs, pneus, obs, fipe, valor_avaliacao (valor que a loja avaliou), valor_pretendido (valor que o cliente pensa/pede pelo carro, se citado). O campo "Modelo" é o carro avaliado (do cliente) → preencha modelo (marca+modelo) e versao (motorização/versão, ex 'crv lx 2.0' → modelo 'CRV', versao 'LX 2.0'). O campo "Troca:" é o carro que o cliente QUER na troca → carro_interesse (ex 'kicks 2017').
-- entrega_agendada: item da lista do grupo de ENTREGAS. Capture loja, data_entrega, horario, vendedor, \
-veiculo_texto (ex 'ASX 2015 KPY-6D44'), placa, observacao. Se a mensagem tiver VÁRIAS entregas, extraia só a primeira \
-(o sistema processa uma por vez).
+- entrega_agendada: SÓ a lista do grupo de ENTREGAS (começa com "🎁 ENTREGAS"), agendando a ENTREGA de um carro JÁ VENDIDO. Capture loja, data_entrega, horario, vendedor, \
+veiculo_texto (ex 'ASX 2015 KPY-6D44'), placa, observacao. Se tiver VÁRIAS, extraia só a primeira.
+- agendamento: marcar uma VISITA/test drive de um cliente (ex começa com "*AGENDAMENTO*", ou "marquei o cliente X pra sexta"). NÃO confunda com entrega_agendada. (Agendamento vem da planilha, então só classifique — não precisa de todos os campos.)
 - anuncio: carro novo CHEGANDO no estoque (grupo de fotos), ainda a anunciar. Capture marca, modelo, versao, ano, cor, km, valor (preço), placa.
 - anuncio_publicado: avisa que um carro JÁ foi anunciado/publicado (ex 'anunciei o Corolla', 'subi o anúncio do 208'). Capture modelo/veiculo_descricao pra localizar.
-- pagamento: avisa que uma venda foi paga. Capture cliente_nome (e status_pagamento).
-- entrega: avisa que um carro JÁ foi entregue ao cliente. Capture cliente_nome.
-- comparecimento: avisa se cliente compareceu/faltou. Capture cliente_nome e compareceu (true/false).
-- nenhum: bate-papo, bom dia, figurinha, sem evento de negócio.
+- pagamento: avisa que uma venda foi paga (ex 'pagamento do HRV', 'Onix quitado'). Capture cliente_nome E o veículo (modelo/veiculo_descricao/placa) pra localizar a venda.
+- entrega: avisa que um carro JÁ foi entregue (ex 'Onix entregue', 'entreguei o do João'). Capture cliente_nome E o veículo (modelo/veiculo_descricao/placa).
+- comparecimento: avisa se um cliente compareceu ou faltou na visita (ex 'Não veio', 'Veio mas não fechou', 'compareceu'). compareceu=false se NÃO veio/faltou; true se veio/compareceu. Capture cliente_nome — se a mensagem for resposta a outra (contexto '[Em resposta a: ...]'), pegue o cliente/carro dali.
+- nenhum: bate-papo, instruções operacionais, bom dia, figurinha, sem evento de negócio.
 
 Regras:
 - Sem evento claro → tipo_evento="nenhum", confianca alta.

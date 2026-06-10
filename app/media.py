@@ -6,6 +6,16 @@ from . import evolution, llm
 log = logging.getLogger("agente")
 
 
+def _citada(msg: dict) -> str:
+    """Texto da mensagem citada (reply), pra dar contexto a 'Não veio', 'pago', etc."""
+    ctx = (msg.get("extendedTextMessage") or {}).get("contextInfo") or {}
+    q = ctx.get("quotedMessage") or {}
+    txt = q.get("conversation") or (q.get("extendedTextMessage") or {}).get("text") \
+        or (q.get("imageMessage") or {}).get("caption") or ""
+    txt = txt.strip()
+    return f"[Em resposta a: {txt[:300]}]\n" if txt else ""
+
+
 def conteudo_texto(instancia: str, apikey: str, data: dict) -> str | None:
     """Extrai texto de uma mensagem: texto direto, transcrição de áudio ou leitura de imagem."""
     msg = data.get("message") or {}
@@ -13,7 +23,7 @@ def conteudo_texto(instancia: str, apikey: str, data: dict) -> str | None:
     if msg.get("conversation"):
         return msg["conversation"]
     if msg.get("extendedTextMessage"):
-        return msg["extendedTextMessage"].get("text")
+        return _citada(msg) + (msg["extendedTextMessage"].get("text") or "")
 
     if msg.get("audioMessage"):
         try:

@@ -71,14 +71,35 @@ def _venda_duplicada(cliente: str | None) -> bool:
     return bool(rows)
 
 
-def _venda_pendente(cliente: str | None, campo_status: str) -> dict | None:
-    if not cliente:
-        return None
+def _venda_pendente(ext: Extracao, campo_status: str) -> dict | None:
+    """Acha a venda pendente por CLIENTE ou VEÍCULO (placa/modelo/versão/descrição)."""
     rows = db.select("vendas", {
-        "select": "id,cliente_nome", campo_status: "eq.pendente",
-        "cliente_nome": f"ilike.*{cliente}*", "order": "created_at.desc", "limit": "1",
+        "select": "id,cliente_nome,modelo,versao,placa", campo_status: "eq.pendente",
+        "order": "created_at.desc",
     })
-    return rows[0] if rows else None
+    if not rows:
+        return None
+    # 1) por cliente
+    if ext.cliente_nome:
+        n = _norm(ext.cliente_nome)
+        for r in rows:
+            if n and n in _norm(r.get("cliente_nome")):
+                return r
+    # 2) por placa
+    if ext.placa:
+        p = _norm(ext.placa).replace("-", "")
+        for r in rows:
+            if p and p in _norm(r.get("placa")).replace("-", ""):
+                return r
+    # 3) por modelo/versão/descrição (token a token, ignorando hífens)
+    termos = " ".join(t for t in (ext.veiculo_descricao, ext.modelo, ext.versao) if t)
+    toks = [_norm(x).replace("-", "") for x in termos.split() if len(x) >= 3 or any(c.isdigit() for c in x)]
+    for tok in toks:
+        for r in rows:
+            alvo = _norm(f"{r.get('modelo', '')} {r.get('versao', '')}").replace("-", "")
+            if tok and tok in alvo:
+                return r
+    return None
 
 
 def _agendamento_recente(cliente: str | None) -> dict | None:
@@ -190,14 +211,14 @@ def aplicar(ext: Extracao) -> tuple[str | None, str | None]:
         return "veiculos", rows[0]["id"]
 
     if t == TipoEvento.pagamento:
-        v = _venda_pendente(ext.cliente_nome, "status_pagamento")
+        v = _venda_pendente(ext, "status_pagamento")
         if not v:
             return None, None
         db.update("vendas", {"status_pagamento": ext.status_pagamento or "pago"}, {"id": f"eq.{v['id']}"})
         return "vendas", v["id"]
 
     if t == TipoEvento.entrega:
-        v = _venda_pendente(ext.cliente_nome, "status_entrega")
+        v = _venda_pendente(ext, "status_entrega")
         if not v:
             return None, None
         db.update("vendas", {"status_entrega": "entregue", "data_entrega_real": datas.hoje_iso(),

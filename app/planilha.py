@@ -88,6 +88,11 @@ def sincronizar() -> dict:
     vistos: set[str] = set()
     abas = [n for n in wb.sheetnames if _ABA_MES.search(n)]
 
+    # comparecimento já registrado (ex: vindo do grupo) p/ não ser apagado quando a planilha ainda diz "Agendado"
+    compareceu_atual = {x["ref_externa"]: x.get("compareceu")
+                        for x in db.select("agendamentos", {"select": "ref_externa,compareceu", "origem": "eq.planilha"})
+                        if x.get("ref_externa")}
+
     # cache de vendedores (resolução em memória, sem ir ao banco por linha)
     vendedores = [v for v in db.select("vendedores", {"select": "id,nome,apelidos,funcao", "ativo": "eq.true"})
                   if v["funcao"] == "vendedor"]
@@ -141,11 +146,14 @@ def sincronizar() -> dict:
                 continue
             vistos.add(ref)
             vend = resolver(vendedor_nome)
+            comp = _compareceu(status)
+            if comp is None:  # planilha sem definição → preserva o que já foi marcado (ex: pelo grupo)
+                comp = compareceu_atual.get(ref)
             registros.append({
                 "cliente_nome": cliente,
                 "vendedor_id": vend["id"] if vend else None,
                 "data_agendada": data_iso,
-                "compareceu": _compareceu(status),
+                "compareceu": comp,
                 "resultado": status or None,
                 "origem": "planilha",
                 "ref_externa": ref,
