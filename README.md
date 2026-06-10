@@ -47,3 +47,16 @@ comparecimento e estoque. Requer env var `DASHBOARD_TOKEN` configurada na Render
 
 ## Timezone
 Datas usam America/Sao_Paulo (`app/datas.py`), não o UTC do servidor.
+
+## Segurança / segredos
+- Nenhum segredo no repo: todas as chaves vivem nas env vars do Portainer
+  (`SUPABASE_SERVICE_ROLE`, `OPENAI_API_KEY`, `EVOLUTION_APIKEY`, `DASHBOARD_TOKEN`,
+  `WEBHOOK_TOKEN`). Números e id da planilha em `CONTEXTO_PRIVADO.md` (fora do git).
+- Endpoints `/cron/*` e `/api/metrics` exigem `DASHBOARD_TOKEN` (comparação em tempo
+  constante). O webhook aceita `WEBHOOK_TOKEN` opcional via `Authorization: Bearer` e
+  tem rate limit de 300 req/min.
+- **Rotação de chaves**: como o repo é público, rotacione periodicamente
+  `SUPABASE_SERVICE_ROLE`, `OPENAI_API_KEY` e `EVOLUTION_APIKEY` (gerar nova no painel
+  de origem → atualizar no Portainer → `docker service update --force agente_agente`).
+  Qualquer chave que tenha passado por chat/log deve ser rotacionada na primeira
+  oportunidade.

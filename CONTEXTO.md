@@ -17,8 +17,9 @@ preencher sistema.
   `.github/workflows/docker-build.yml`).
 - **Banco**: Supabase (Postgres). **IA**: OpenAI (gpt-4.1-mini extração, gpt-4.1 conversa).
   **WhatsApp**: Evolution API (`https://evo.agenteintel.com.br`).
-- **2 números**: `diogo4895` (coletor — fica nos grupos só ESCUTANDO; é o nº pessoal do dono 5521980994895)
-  e `lojasb` (assistente — fala com o dono no privado; nº 5516994539586).
+- **2 números**: `diogo4895` (coletor — fica nos grupos só ESCUTANDO; nº pessoal do dono)
+  e `lojasb` (assistente — fala com o dono no privado). Os números reais ficam em
+  `CONTEXTO_PRIVADO.md` (fora do git) e nas env vars do Portainer.
 - Webhook Evolution → app interno `http://agente_agente:8000/webhook/evolution`. App → Evolution interno
   `http://evolution:8080`.
 - **Deploy de mudança**: commit → GitHub Actions builda a imagem → na VPS:
@@ -106,9 +107,10 @@ agendamentos (grupos não criam agendamento).
 ## ⚙️ Variáveis de ambiente (valores reais ficam no stack do Portainer, NÃO no repo)
 SUPABASE_URL, SUPABASE_SERVICE_ROLE, OPENAI_API_KEY, OPENAI_MODEL_EXTRACAO, OPENAI_MODEL_CONSULTA,
 EVOLUTION_URL (http://evolution:8080), EVOLUTION_INSTANCE (diogo4895), EVOLUTION_APIKEY,
-EVOLUTION_ASSIST_INSTANCE (lojasb), EVOLUTION_ASSIST_APIKEY, MEU_NUMERO (5521980994895),
-NUMEROS_RELATORIO (5521994110597), DASHBOARD_TOKEN, CONFIANCA_MINIMA (0.8), VERIFY_SSL (true),
-planilha_sheet_id (default no config), agendamento_via_grupo (false).
+EVOLUTION_ASSIST_INSTANCE (lojasb), EVOLUTION_ASSIST_APIKEY, MEU_NUMERO,
+NUMEROS_RELATORIO, DASHBOARD_TOKEN, WEBHOOK_TOKEN (opcional), CONFIANCA_MINIMA (0.8),
+VERIFY_SSL (true), PLANILHA_SHEET_ID, AGENDAMENTO_VIA_GRUPO (false).
+Os valores reais estão só no Portainer e em `CONTEXTO_PRIVADO.md` (fora do git).
 
 ## ⚠️ Pendências / ideias futuras
 - **Meta Ads** (token + act_ID) pra cruzar gasto/leads/ROAS com vendas do canal Tráfego — não conectado.

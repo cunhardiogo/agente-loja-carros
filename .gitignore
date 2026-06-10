@@ -5,3 +5,4 @@ __pycache__/
 venv/
 db/apply.py
 db/check.py
+CONTEXTO_PRIVADO.md

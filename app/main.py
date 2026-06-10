@@ -1,3 +1,4 @@
+import hmac
 import logging
 import os
 
@@ -13,6 +14,23 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("agente")
 
 app = FastAPI(title="Agente Loja de Carros — Grupo SB")
+
+
+def _token_ok(token: str) -> bool:
+    """Comparação em tempo constante (evita timing attack) do token de cron/dashboard."""
+    return bool(settings.dashboard_token) and hmac.compare_digest(token or "", settings.dashboard_token)
+
+
+_rate = {"min": 0, "n": 0}
+
+
+def _rate_limit_ok(limite: int = 300) -> bool:
+    """Limita o webhook a `limite` req/min por processo (defesa simples contra flood)."""
+    minuto = int(_time.time() // 60)
+    if minuto != _rate["min"]:
+        _rate["min"], _rate["n"] = minuto, 0
+    _rate["n"] += 1
+    return _rate["n"] <= limite
 
 
 import threading
@@ -175,6 +193,13 @@ def health():
 
 @app.post("/webhook/evolution")
 async def webhook(request: Request, background: BackgroundTasks):
+    # auth opcional por Bearer (só checa se WEBHOOK_TOKEN estiver configurado)
+    if settings.webhook_token:
+        auth = request.headers.get("authorization", "")
+        if not hmac.compare_digest(auth, f"Bearer {settings.webhook_token}"):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+    if not _rate_limit_ok():
+        return JSONResponse({"error": "rate_limited"}, status_code=429)
     body = await request.json()
     # responde na hora; o trabalho pesado (mídia/IA/banco) roda em background num
     # threadpool. A idempotência por message_id protege contra o retry do Evolution.
@@ -284,7 +309,7 @@ def _metrics() -> dict:
 
 @app.get("/api/metrics")
 def api_metrics(token: str = ""):
-    if not settings.dashboard_token or token != settings.dashboard_token:
+    if not _token_ok(token):
         return JSONResponse({"erro": "não autorizado"}, status_code=401)
     return _metrics()
 
@@ -423,7 +448,7 @@ def _resumo_diario_texto() -> str:
 
 @app.api_route("/cron/sync-planilha", methods=["GET", "POST"])
 def cron_sync_planilha(token: str = ""):
-    if not settings.dashboard_token or token != settings.dashboard_token:
+    if not _token_ok(token):
         return JSONResponse({"erro": "não autorizado"}, status_code=401)
     try:
         return planilha.sincronizar()
@@ -532,7 +557,7 @@ def _planejamento_semana_texto() -> str:
 
 @app.api_route("/cron/planejamento-semana", methods=["GET", "POST"])
 def cron_planejamento(token: str = ""):
-    if not settings.dashboard_token or token != settings.dashboard_token:
+    if not _token_ok(token):
         return JSONResponse({"erro": "não autorizado"}, status_code=401)
     try:
         planilha.sincronizar()
@@ -545,7 +570,7 @@ def cron_planejamento(token: str = ""):
 
 @app.api_route("/cron/resumo-semanal", methods=["GET", "POST"])
 def cron_semanal(token: str = ""):
-    if not settings.dashboard_token or token != settings.dashboard_token:
+    if not _token_ok(token):
         return JSONResponse({"erro": "não autorizado"}, status_code=401)
     try:
         planilha.sincronizar()
@@ -558,14 +583,14 @@ def cron_semanal(token: str = ""):
 
 @app.api_route("/cron/lembretes", methods=["GET", "POST"])
 def cron_lembretes(token: str = ""):
-    if not settings.dashboard_token or token != settings.dashboard_token:
+    if not _token_ok(token):
         return JSONResponse({"erro": "não autorizado"}, status_code=401)
     return {"enviados": _disparar_lembretes()}
 
 
 @app.api_route("/cron/agenda-manha", methods=["GET", "POST"])
 def cron_agenda(token: str = ""):
-    if not settings.dashboard_token or token != settings.dashboard_token:
+    if not _token_ok(token):
         return JSONResponse({"erro": "não autorizado"}, status_code=401)
     try:
         planilha.sincronizar()
@@ -578,7 +603,7 @@ def cron_agenda(token: str = ""):
 
 @app.api_route("/cron/resumo-diario", methods=["GET", "POST"])
 def cron_resumo(token: str = ""):
-    if not settings.dashboard_token or token != settings.dashboard_token:
+    if not _token_ok(token):
         return JSONResponse({"erro": "não autorizado"}, status_code=401)
     try:
         planilha.sincronizar()  # garante planilha fresca antes do fechamento
