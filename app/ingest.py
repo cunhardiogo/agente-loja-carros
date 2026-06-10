@@ -90,34 +90,64 @@ def _venda_existente(ext: Extracao) -> dict | None:
     return None
 
 
+# palavras/tokens genéricos demais pra casar uma venda específica
+_STOP_VEICULO = {
+    "carro", "carros", "veiculo", "auto", "automatico", "manual", "flex", "completo",
+    "novo", "usado", "seminovo", "zero", "cor", "preto", "branco", "prata", "cinza",
+    "vermelho", "azul", "vinho", "dourado", "bege", "verde", "amarelo", "marrom", "laranja",
+}
+_RE_GENERICO = re.compile(r"^\d+([.,]\d+)?v?$")  # ano (2020), motorização (1.0, 2.0, 16v)
+
+
+def _tokens_veiculo(ext: Extracao) -> list[str]:
+    """Tokens úteis pra identificar o veículo (sem ano/motorização/cor/genéricos)."""
+    termos = " ".join(t for t in (ext.veiculo_descricao, ext.modelo, ext.versao) if t)
+    out = []
+    for x in termos.split():
+        tok = _norm(x).replace("-", "")
+        if len(tok) < 3 or tok in _STOP_VEICULO or _RE_GENERICO.match(tok):
+            continue
+        out.append(tok)
+    return out
+
+
 def _venda_pendente(ext: Extracao, campo_status: str) -> dict | None:
-    """Acha a venda pendente por CLIENTE ou VEÍCULO (placa/modelo/versão/descrição)."""
-    rows = db.select("vendas", {
+    """Acha a venda pendente por CLIENTE ou VEÍCULO, exigindo UNICIDADE.
+    Se o critério bate em mais de uma venda (ambíguo), devolve None — o chamador
+    transforma em pendência e pergunta, em vez de chutar a venda errada."""
+    rows = db.select_all("vendas", {
         "select": "id,cliente_nome,modelo,versao,placa", campo_status: "eq.pendente",
         "order": "created_at.desc",
     })
     if not rows:
         return None
-    # 1) por cliente
-    if ext.cliente_nome:
-        n = _norm(ext.cliente_nome)
-        for r in rows:
-            if n and n in _norm(r.get("cliente_nome")):
-                return r
-    # 2) por placa
+
+    # 1) placa (sinal forte) — tem de ser única
     if ext.placa:
         p = _norm(ext.placa).replace("-", "")
-        for r in rows:
-            if p and p in _norm(r.get("placa")).replace("-", ""):
-                return r
-    # 3) por modelo/versão/descrição (token a token, ignorando hífens)
-    termos = " ".join(t for t in (ext.veiculo_descricao, ext.modelo, ext.versao) if t)
-    toks = [_norm(x).replace("-", "") for x in termos.split() if len(x) >= 3 or any(c.isdigit() for c in x)]
-    for tok in toks:
-        for r in rows:
-            alvo = _norm(f"{r.get('modelo', '')} {r.get('versao', '')}").replace("-", "")
-            if tok and tok in alvo:
-                return r
+        cand = [r for r in rows if p and p in _norm(r.get("placa")).replace("-", "")]
+        if len(cand) == 1:
+            return cand[0]
+        if len(cand) > 1:
+            return None
+
+    # 2) cliente — único; se houver homônimos pendentes, desempata pelo veículo
+    if ext.cliente_nome:
+        n = _norm(ext.cliente_nome)
+        cand = [r for r in rows if n and n in _norm(r.get("cliente_nome"))]
+        if len(cand) == 1:
+            return cand[0]
+        if len(cand) > 1:
+            por_veic = [r for r in cand if _veiculo_casa(ext, r)]
+            return por_veic[0] if len(por_veic) == 1 else None
+
+    # 3) tokens de veículo (sem proibidos) — única venda casada
+    toks = _tokens_veiculo(ext)
+    if toks:
+        cand = [r for r in rows
+                if any(tok in _norm(f"{r.get('modelo', '')} {r.get('versao', '')}").replace("-", "") for tok in toks)]
+        if len(cand) == 1:
+            return cand[0]
     return None
 
 
