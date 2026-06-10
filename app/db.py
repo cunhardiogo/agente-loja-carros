@@ -57,6 +57,17 @@ def insert(table: str, data: dict) -> dict:
     return rows[0] if rows else {}
 
 
+def insert_lock(table: str, data: dict) -> dict | None:
+    """Insere; retorna None se violar unique (409). Usado como lock de idempotência:
+    o INSERT do message_id é a trava antes de qualquer escrita de negócio."""
+    r = _client.post(f"/{table}", json=data, headers={"Prefer": "return=representation"})
+    if r.status_code == 409:
+        return None
+    r.raise_for_status()
+    rows = r.json()
+    return rows[0] if rows else {}
+
+
 def update(table: str, data: dict, params: dict) -> list[dict]:
     r = _client.patch(f"/{table}", json=data, params=params, headers={"Prefer": "return=representation"})
     r.raise_for_status()

@@ -264,15 +264,35 @@ def processar(grupo: dict, message_id: str | None, remetente: str | None,
               remetente_nome: str | None, texto: str, timestamp_msg: str | None) -> dict:
     blocos = _split_entregas(texto)
     if len(blocos) > 1:
-        res = [_processar_um(grupo, None, remetente, remetente_nome, b, timestamp_msg) for b in blocos]
+        res = []
+        for i, b in enumerate(blocos):
+            # message_id composto: cada item da lista vira sua própria trava de idempotência
+            mid = f"{message_id}#{i}" if message_id else None
+            res.append(_processar_um(grupo, mid, remetente, remetente_nome, b, timestamp_msg))
         return {"multiplos": len(res), "itens": res}
     return _processar_um(grupo, message_id, remetente, remetente_nome, texto, timestamp_msg)
 
 
 def _processar_um(grupo: dict, message_id: str | None, remetente: str | None,
                   remetente_nome: str | None, texto: str, timestamp_msg: str | None) -> dict:
+    # LOCK antecipado: grava eventos_brutos como 'processando' ANTES de extrair/aplicar.
+    # Se o message_id já existe (redelivery do Evolution), o índice único barra aqui e
+    # nenhuma escrita de negócio (venda/avaliação) é duplicada.
+    evento = db.insert_lock("eventos_brutos", {
+        "grupo_id": grupo["id"], "message_id": message_id,
+        "remetente": remetente, "remetente_nome": remetente_nome,
+        "mensagem_original": texto, "timestamp_msg": timestamp_msg,
+        "status": "processando",
+    })
+    if evento is None:
+        return {"ignored": "duplicada", "message_id": message_id}
+    return _executar(evento["id"], grupo, texto)
+
+
+def _executar(evento_id: str, grupo: dict, texto: str) -> dict:
+    """Extrai + aplica + finaliza o evento já travado (status 'processando' → final)."""
     vendedores = db.select("vendedores", {"select": "id,nome,apelidos,funcao", "ativo": "eq.true"})
-    ext = llm.extrair(texto, grupo["nome"], grupo.get("tipo"), vendedores)
+    ext = llm.extrair(texto, grupo.get("nome") or "", grupo.get("tipo"), vendedores)
 
     tabela = registro_id = None
     status = "auto"
@@ -294,13 +314,18 @@ def _processar_um(grupo: dict, message_id: str | None, remetente: str | None,
             status = "pendente_confirmacao"
             evolution.notificar_dono(_pergunta_confirmacao(ext))
 
-    evento = db.insert("eventos_brutos", {
-        "grupo_id": grupo["id"], "message_id": message_id,
-        "remetente": remetente, "remetente_nome": remetente_nome,
-        "mensagem_original": texto, "timestamp_msg": timestamp_msg,
+    db.update("eventos_brutos", {
         "tipo_evento": ext.tipo_evento.value, "dados_extraidos": ext.model_dump(mode="json"),
         "confianca": ext.confianca, "status": status,
         "registro_tabela": tabela, "registro_id": registro_id,
-    })
-    return {"evento_id": evento.get("id"), "tipo": ext.tipo_evento.value,
+    }, {"id": f"eq.{evento_id}"})
+    return {"evento_id": evento_id, "tipo": ext.tipo_evento.value,
             "confianca": ext.confianca, "status": status, "registro_id": registro_id}
+
+
+def reprocessar(ev: dict) -> dict:
+    """Retoma um evento travado em 'processando' (chamado pelo reaper). Reusa a linha
+    existente — não cria nova trava. _venda_duplicada evita venda em dobro no retry."""
+    g = db.select("grupos", {"select": "id,nome,tipo", "id": f"eq.{ev['grupo_id']}", "limit": "1"})
+    grupo = g[0] if g else {"id": ev.get("grupo_id"), "nome": "", "tipo": None}
+    return _executar(ev["id"], grupo, ev.get("mensagem_original") or "")

@@ -1,7 +1,9 @@
 import logging
 import os
 
-from fastapi import FastAPI, Request
+from datetime import timedelta
+
+from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from . import confirmacao, consulta, datas, db, evolution, ingest, media, planilha
@@ -25,6 +27,7 @@ def _tick() -> None:
         return
     _ult_lembrete["t"] = _time.time()
     _disparar_lembretes()
+    _reaper_eventos()
     _checar_lojasb()
     _checar_relatorios()
     if _time.time() - _ult_planilha["t"] > 600:  # sync da planilha a cada ~10 min
@@ -72,6 +75,30 @@ def _checar_lojasb() -> None:
             except Exception:
                 pass
     _lojasb_ok["v"] = ok
+
+
+def _reaper_eventos() -> int:
+    """Retoma eventos travados em 'processando' há >10min (app caiu no meio).
+    Tenta reprocessar uma vez; se falhar, marca 'erro' e avisa o dono."""
+    limite = (datas.agora() - timedelta(minutes=10)).isoformat()
+    travados = db.select("eventos_brutos", {
+        "select": "id,grupo_id,mensagem_original", "status": "eq.processando",
+        "created_at": f"lte.{limite}", "limit": "20"})
+    n = 0
+    for ev in travados:
+        try:
+            ingest.reprocessar(ev)
+            n += 1
+        except Exception:
+            log.exception("reaper: falha reprocessando %s", ev.get("id"))
+            db.update("eventos_brutos", {"status": "erro"}, {"id": f"eq.{ev['id']}"})
+            try:
+                evolution.notificar_dono(
+                    "⚠️ Não consegui processar uma mensagem de grupo (marquei como erro). "
+                    f"Trecho: {(ev.get('mensagem_original') or '')[:200]}")
+            except Exception:
+                pass
+    return n
 
 
 def _disparar_lembretes() -> int:
@@ -143,8 +170,23 @@ def health():
 
 
 @app.post("/webhook/evolution")
-async def webhook(request: Request):
+async def webhook(request: Request, background: BackgroundTasks):
     body = await request.json()
+    # responde na hora; o trabalho pesado (mídia/IA/banco) roda em background num
+    # threadpool. A idempotência por message_id protege contra o retry do Evolution.
+    background.add_task(_handle_event, body)
+    return {"ok": True}
+
+
+def _handle_event(body: dict) -> dict:
+    try:
+        return _rotear_evento(body)
+    except Exception as e:
+        log.exception("erro processando webhook")
+        return {"error": str(e)}
+
+
+def _rotear_evento(body: dict) -> dict:
     instancia = body.get("instance")
     data = body.get("data") or {}
     key = data.get("key") or {}
@@ -181,20 +223,16 @@ async def webhook(request: Request):
     if ingest.ja_processada(message_id):
         return {"ignored": "duplicada", "message_id": message_id}
 
-    try:
-        res = ingest.processar(
-            grupo=grupo,
-            message_id=message_id,
-            remetente=key.get("participant"),
-            remetente_nome=data.get("pushName"),
-            texto=texto,
-            timestamp_msg=None,
-        )
-        log.info("evento %s", res)
-        return res
-    except Exception as e:
-        log.exception("erro processando")
-        return {"error": str(e)}
+    res = ingest.processar(
+        grupo=grupo,
+        message_id=message_id,
+        remetente=key.get("participant"),
+        remetente_nome=data.get("pushName"),
+        texto=texto,
+        timestamp_msg=None,
+    )
+    log.info("evento %s", res)
+    return res
 
 
 def _consulta(pergunta: str, numero: str):
