@@ -128,24 +128,28 @@ def _marcar_enviado(tipo: str, data: str) -> None:
         pass
 
 
+def _jobs_relatorio(dow: int, hhmm: str) -> list:
+    """Relatórios elegíveis AGORA. Cada um tem uma JANELA [inicio, fim]: fora dela
+    não dispara (evita mandar a agenda da manhã às 23h quando o app ficou fora)."""
+    # (tipo, fn, dias_da_semana, inicio, fim)
+    JANELAS = [
+        ("planejamento", _planejamento_semana_texto, {0}, "08:00", "11:59"),
+        ("agenda", _agenda_manha_texto, {0, 1, 2, 3, 4, 5}, "09:00", "11:59"),
+        ("fechamento", _resumo_diario_texto, {0, 1, 2, 3, 4}, "18:00", "21:59"),
+        ("fechamento", _resumo_diario_texto, {5}, "15:00", "21:59"),
+        ("semanal", _resumo_semanal_texto, {6}, "18:00", "21:59"),
+    ]
+    return [(tipo, fn) for tipo, fn, dias, ini, fim in JANELAS
+            if dow in dias and ini <= hhmm <= fim]
+
+
 def _checar_relatorios() -> None:
-    """Dispara os relatórios no horário certo (independente do GitHub Actions)."""
+    """Dispara os relatórios na janela certa (independente do GitHub Actions)."""
     now = datas.agora()
     hhmm = now.strftime("%H:%M")
     dow = now.weekday()  # 0=segunda ... 6=domingo
     hoje = now.date().isoformat()
-    jobs = []
-    if dow == 0 and hhmm >= "08:00":
-        jobs.append(("planejamento", _planejamento_semana_texto))
-    if dow <= 5 and hhmm >= "09:00":
-        jobs.append(("agenda", _agenda_manha_texto))
-    if dow <= 4 and hhmm >= "18:00":
-        jobs.append(("fechamento", _resumo_diario_texto))
-    if dow == 5 and hhmm >= "15:00":
-        jobs.append(("fechamento", _resumo_diario_texto))
-    if dow == 6 and hhmm >= "18:00":
-        jobs.append(("semanal", _resumo_semanal_texto))
-    for tipo, fn in jobs:
+    for tipo, fn in _jobs_relatorio(dow, hhmm):
         if _ja_enviado(tipo, hoje):
             continue
         try:
