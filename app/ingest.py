@@ -244,11 +244,19 @@ def reextrair(mensagem_original: str, correcao: str) -> Extracao:
     return llm.extrair(texto, "correção", None, vendedores)
 
 
-def _pergunta_confirmacao(ext: Extracao) -> str:
-    return (f"❓ Confirma este registro?\n"
+def codigo_pendencia(evento_id: str) -> str:
+    """Código curto da pendência (4 hex do id) usado na fila de confirmação."""
+    return (evento_id or "").replace("-", "")[:4].upper()
+
+
+def _pergunta_confirmacao(ext: Extracao, codigo: str | None = None) -> str:
+    tag = f" [#{codigo}]" if codigo else ""
+    instr = (f"Responda: *{codigo} sim* / *{codigo} não* / *{codigo} corrige ...*"
+             if codigo else "Responda: *sim* / *não* / *corrigir ...*")
+    return (f"❓ Confirma este registro?{tag}\n"
             f"• Tipo: {ext.tipo_evento.value}\n"
             f"• {ext.resumo or ext.veiculo_descricao or '(sem resumo)'}\n\n"
-            f"Responda: *sim* / *não* / *corrigir ...*")
+            f"{instr}")
 
 
 def _split_entregas(texto: str) -> list[str]:
@@ -297,13 +305,14 @@ def _executar(evento_id: str, grupo: dict, texto: str) -> dict:
     tabela = registro_id = None
     status = "auto"
 
+    codigo = codigo_pendencia(evento_id)
     if ext.tipo_evento == TipoEvento.nenhum:
         pass
     elif ext.tipo_evento == TipoEvento.agendamento and not settings.agendamento_via_grupo:
         status = "ignorado_planilha"  # agendamento é controlado pela planilha
     elif ext.confianca < settings.confianca_minima:
         status = "pendente_confirmacao"
-        evolution.notificar_dono(_pergunta_confirmacao(ext))
+        evolution.notificar_dono(_pergunta_confirmacao(ext, codigo))
     else:
         tabela, registro_id = aplicar(ext)
         if tabela == "duplicada":
@@ -312,7 +321,7 @@ def _executar(evento_id: str, grupo: dict, texto: str) -> dict:
             status = "auto"
         else:
             status = "pendente_confirmacao"
-            evolution.notificar_dono(_pergunta_confirmacao(ext))
+            evolution.notificar_dono(_pergunta_confirmacao(ext, codigo))
 
     db.update("eventos_brutos", {
         "tipo_evento": ext.tipo_evento.value, "dados_extraidos": ext.model_dump(mode="json"),

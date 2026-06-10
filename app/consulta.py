@@ -435,7 +435,13 @@ def historico_cliente(nome: str) -> dict:
             "encontrou": bool(ag or vd)}
 
 
+def listar_pendencias() -> dict:
+    from . import confirmacao
+    return {"texto": confirmacao.listar_pendencias()}
+
+
 DISPATCH = {
+    "listar_pendencias": listar_pendencias,
     "vendidos": vendidos,
     "reservados": reservados,
     "listar_agendamentos": listar_agendamentos,
@@ -464,6 +470,11 @@ _DI = {"type": "string", "description": "Data início ISO YYYY-MM-DD (opcional, 
 _DF = {"type": "string", "description": "Data fim ISO YYYY-MM-DD (opcional)"}
 
 TOOLS = [
+    {"type": "function", "function": {
+        "name": "listar_pendencias",
+        "description": "Lista os eventos aguardando confirmação (fila de pendências), com o código de cada um.",
+        "parameters": {"type": "object", "properties": {}},
+    }},
     {"type": "function", "function": {
         "name": "vendidos",
         "description": "Quantos carros foram VENDIDOS no período (contagem confiável da planilha).",
