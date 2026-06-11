@@ -26,12 +26,16 @@ preencher sistema.
   `docker service update --image ghcr.io/cunhardiogo/agente-loja-carros:latest --force agente_agente`.
 
 ## 📁 Estrutura
-- `app/main.py` — FastAPI: webhook, roteamento grupo/DM, endpoints /cron/*, /dashboard, /api/metrics,
-  agendador interno (`_loop_agendador`/`_tick`: lembretes, relatórios, checagem lojasb, sync planilha),
-  builders de relatório (agenda manhã, fechamento, semanal, planejamento).
-- `app/ingest.py` — pipeline de ingestão: `processar` (split de entregas), `aplicar` (INSERT/UPDATE por
-  tipo), matchers (`_venda_pendente` casa por cliente OU veículo, `_agendamento_recente`), dedup,
-  confirmação, `parse_pix` (calcula entrada).
+- `app/main.py` — FastAPI: webhook ASSÍNCRONO (BackgroundTasks), roteamento grupo/DM, /dashboard,
+  /api/metrics, agendador interno (`_loop_agendador`/`_tick`: lembretes, reaper de eventos travados,
+  radar do supervisor, checagem lojasb, relatórios, sync planilha), builders de relatório.
+- `app/ingest.py` — pipeline de ingestão: lock antecipado de idempotência (`insert_lock` →
+  eventos_brutos 'processando' antes de extrair), `_executar`/`reprocessar`, `processar` (split de
+  entregas c/ message_id composto), `aplicar` (INSERT/UPDATE por tipo), matchers seguros
+  (`_venda_pendente` por unicidade, `_venda_existente` cliente+veículo), `parse_pix`.
+- `app/supervisor.py` — supervisor autônomo (Fase 2): regras R1–R10 + watchdog W1–W5, alertas com
+  dedup (`uq_alertas_aberto`), radar proativo (10:30/16:30 + crítico na hora), insights por IA
+  (diário/semanal), notas livres (`anotar`/`listar_notas`/`resolver_nota`).
 - `app/llm.py` — `SYSTEM` (prompt de extração), `extrair` (structured output → schema Extracao),
   `transcrever_audio` (whisper), `ler_imagem` (visão).
 - `app/consulta.py` — agente conversacional: `SYSTEM` (prompt), `responder` (function calling com memória),
@@ -39,7 +43,8 @@ preencher sistema.
 - `app/media.py` — extrai texto de texto/áudio/imagem + contexto de **reply** (`_citada`).
 - `app/planilha.py` — sync da planilha Google (xlsx, todas as abas <Mes>26), upsert por ref_externa,
   espelha exclusões, preserva comparecimento do grupo.
-- `app/confirmacao.py` — loop sim/não/corrigir das pendências.
+- `app/confirmacao.py` — loop sim/não/corrigir das pendências (fila numerada [#A3F2], janela 24h,
+  gatilhos seguros, desambiguação quando há 2+ pendências).
 - `app/evolution.py` — envio (lojasb/coletor), get_media, estado, alertas.
 - `app/schemas.py` — `Extracao` (Pydantic) + `TipoEvento`.
 - `app/datas.py` — agora()/hoje() em America/Sao_Paulo.
