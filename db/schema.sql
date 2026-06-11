@@ -159,3 +159,40 @@ create table if not exists relatorios_enviados (
   tipo text not null, data date not null, created_at timestamptz default now(),
   primary key (tipo, data)
 );
+
+-- ===== alertas (supervisor: rule engine + watchdog) =====
+create table if not exists alertas (
+  id uuid primary key default gen_random_uuid(),
+  tipo text not null, chave text not null,
+  severidade text not null default 'aviso',
+  titulo text not null, detalhe text,
+  entidade_tabela text, entidade_id uuid,
+  status text not null default 'aberto',
+  notificado boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  resolved_at timestamptz
+);
+create unique index if not exists uq_alertas_aberto on alertas(tipo, chave) where status = 'aberto';
+create index if not exists idx_alertas_status on alertas(status);
+create index if not exists idx_alertas_notificar on alertas(notificado) where status = 'aberto';
+drop trigger if exists trg_alertas_updated on alertas;
+create trigger trg_alertas_updated before update on alertas for each row execute function set_updated_at();
+
+-- ===== insights (análise gerada por IA) =====
+create table if not exists insights (
+  id uuid primary key default gen_random_uuid(),
+  periodo text not null, data date not null,
+  conteudo text not null, dados jsonb,
+  created_at timestamptz not null default now()
+);
+create unique index if not exists uq_insights on insights(periodo, data);
+
+-- ===== notas (anotações livres do dono) =====
+create table if not exists notas (
+  id uuid primary key default gen_random_uuid(),
+  numero text, texto text not null,
+  resolvida boolean not null default false,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_notas_abertas on notas(resolvida, created_at);
