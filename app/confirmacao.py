@@ -73,6 +73,29 @@ def _aplicar_corrige(ev: dict, texto: str) -> str:
     return "Anotei a correção, mas ainda não bati com um registro existente."
 
 
+def confirmar_id(evento_id: str) -> dict:
+    """Confirma uma pendência específica (usado pelos botões do dashboard)."""
+    ev = db.select("eventos_brutos", {"select": "id,dados_extraidos,mensagem_original",
+                                      "id": f"eq.{evento_id}", "status": "eq.pendente_confirmacao", "limit": "1"})
+    if not ev:
+        return {"erro": "pendência não encontrada"}
+    return {"ok": True, "mensagem": _aplicar_sim(ev[0])}
+
+
+def descartar_id(evento_id: str) -> dict:
+    rows = db.update("eventos_brutos", {"status": "descartado"},
+                     {"id": f"eq.{evento_id}", "status": "eq.pendente_confirmacao"})
+    return {"ok": bool(rows)}
+
+
+def pendentes_itens() -> list[dict]:
+    from . import ingest
+    return [{"id": p["id"], "codigo": ingest.codigo_pendencia(p["id"]),
+             "tipo": p.get("tipo_evento"), "resumo": _resumo(p.get("dados_extraidos") or {}),
+             "mensagem": (p.get("mensagem_original") or "")[:200]}
+            for p in _pendentes()]
+
+
 def tentar_resolver(texto: str) -> str | None:
     """Resolve confirmação de pendências. Retorna None se o texto não for um comando
     de confirmação (aí o agente normal responde)."""

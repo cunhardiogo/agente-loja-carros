@@ -320,10 +320,25 @@ def _consulta(pergunta: str, numero: str):
 
 
 # ===== Dashboard (servido pela própria Render) =====
+def _ultimo_insight() -> str:
+    rows = db.select("insights", {"select": "conteudo", "periodo": "eq.diario",
+                                  "order": "data.desc", "limit": "1"})
+    return rows[0]["conteudo"] if rows else ""
+
+
+def _funil() -> dict:
+    ag = consulta.resumo_agendamentos("mes")
+    vendidos = consulta.vendidos("mes")["quantidade"]
+    vl = consulta.lista_vendas("tudo")
+    entregues = sum(1 for x in vl.get("vendas", []) if x.get("status_entrega") == "entregue")
+    return {"agendados": ag["total"], "compareceram": ag["compareceram"],
+            "vendidos": vendidos, "entregues": entregues}
+
+
 def _metrics() -> dict:
     a_receber = consulta.pendencias("pagamento")
     a_entregar = consulta.pendencias("entrega")
-    pendentes = db.select("eventos_brutos", {"select": "id", "status": "eq.pendente_confirmacao"})
+    pendentes = confirmacao.pendentes_itens()
     return {
         "vendidos_mes": consulta.vendidos("mes"),
         "reservados_mes": consulta.reservados("mes"),
@@ -341,6 +356,12 @@ def _metrics() -> dict:
         "conversao": consulta.conversao("mes"),
         "margem": consulta.margem_avaliacoes("mes"),
         "pendentes_confirmacao": len(pendentes),
+        # Fase 3 — supervisor no painel
+        "radar": supervisor.abertos(),
+        "insight": _ultimo_insight(),
+        "pendentes_itens": pendentes,
+        "notas": supervisor.listar_notas()["notas"],
+        "funil": _funil(),
     }
 
 
@@ -349,6 +370,27 @@ def api_metrics(token: str = ""):
     if not _token_ok(token):
         return JSONResponse({"erro": "não autorizado"}, status_code=401)
     return _metrics()
+
+
+@app.post("/api/eventos/{evento_id}/confirmar")
+def api_confirmar(evento_id: str, token: str = ""):
+    if not _token_ok(token):
+        return JSONResponse({"erro": "não autorizado"}, status_code=401)
+    return confirmacao.confirmar_id(evento_id)
+
+
+@app.post("/api/eventos/{evento_id}/descartar")
+def api_descartar(evento_id: str, token: str = ""):
+    if not _token_ok(token):
+        return JSONResponse({"erro": "não autorizado"}, status_code=401)
+    return confirmacao.descartar_id(evento_id)
+
+
+@app.post("/api/alertas/resolver")
+def api_resolver_alerta(titulo: str = "", token: str = ""):
+    if not _token_ok(token):
+        return JSONResponse({"erro": "não autorizado"}, status_code=401)
+    return supervisor.resolver_alerta(titulo)
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
