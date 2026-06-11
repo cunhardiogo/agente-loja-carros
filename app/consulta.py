@@ -442,8 +442,38 @@ def listar_pendencias() -> dict:
     return {"texto": confirmacao.listar_pendencias()}
 
 
+def radar() -> dict:
+    from . import supervisor
+    return {"texto": supervisor.radar_texto()}
+
+
+def resolver_alerta(termo: str) -> dict:
+    from . import supervisor
+    return supervisor.resolver_alerta(termo)
+
+
+def anotar(texto: str) -> dict:
+    from . import supervisor
+    return supervisor.anotar(texto, _ctx.get("numero"))
+
+
+def listar_notas() -> dict:
+    from . import supervisor
+    return supervisor.listar_notas()
+
+
+def resolver_nota(termo: str) -> dict:
+    from . import supervisor
+    return supervisor.resolver_nota(termo)
+
+
 DISPATCH = {
     "listar_pendencias": listar_pendencias,
+    "radar": radar,
+    "resolver_alerta": resolver_alerta,
+    "anotar": anotar,
+    "listar_notas": listar_notas,
+    "resolver_nota": resolver_nota,
     "vendidos": vendidos,
     "reservados": reservados,
     "listar_agendamentos": listar_agendamentos,
@@ -476,6 +506,34 @@ TOOLS = [
         "name": "listar_pendencias",
         "description": "Lista os eventos aguardando confirmação (fila de pendências), com o código de cada um.",
         "parameters": {"type": "object", "properties": {}},
+    }},
+    {"type": "function", "function": {
+        "name": "radar",
+        "description": "Mostra os alertas abertos do supervisor (carro encalhado, a receber parado, entrega atrasada, "
+                       "comparecimento baixo, sistema fora, etc.). Use quando perguntarem 'o que preciso resolver?', "
+                       "'tem algum alerta?', 'como está a operação?'.",
+        "parameters": {"type": "object", "properties": {}},
+    }},
+    {"type": "function", "function": {
+        "name": "resolver_alerta",
+        "description": "Marca um alerta do radar como resolvido. Passe um trecho do título do alerta.",
+        "parameters": {"type": "object", "properties": {"termo": {"type": "string"}}, "required": ["termo"]},
+    }},
+    {"type": "function", "function": {
+        "name": "anotar",
+        "description": "Salva uma anotação livre do dono (ex: 'anota pra ligar pro fornecedor', 'lembra de cobrar o Carlos'). "
+                       "Diferente de lembrete: não tem horário, fica numa lista de pendências pessoais.",
+        "parameters": {"type": "object", "properties": {"texto": {"type": "string"}}, "required": ["texto"]},
+    }},
+    {"type": "function", "function": {
+        "name": "listar_notas",
+        "description": "Lista as anotações livres em aberto.",
+        "parameters": {"type": "object", "properties": {}},
+    }},
+    {"type": "function", "function": {
+        "name": "resolver_nota",
+        "description": "Marca uma anotação como concluída. Passe um trecho do texto da nota.",
+        "parameters": {"type": "object", "properties": {"termo": {"type": "string"}}, "required": ["termo"]},
     }},
     {"type": "function", "function": {
         "name": "vendidos",
@@ -622,6 +680,7 @@ AÇÕES quando o dono pedir: marcar_entregue, marcar_pago, marcar_anunciado, e E
 (corrigir canal/valor/vendedor/pagamento/datas/cliente de uma venda — ex 'a venda do Denilson foi pelo tráfego', 'a do João foi 95 mil') \
 e atualizar_carro (preço/status/cor/km do estoque). Confirme em 1 linha o que mudou (ou que não encontrou). Nunca invente se a ferramenta der erro. \
 LEMBRETES: criar_lembrete quando o dono pedir p/ ser lembrado (calcule 'quando' em ISO a partir da DATA DE HOJE); listar_lembretes p/ ver os pendentes.
+SUPERVISOR: você é proativo. radar mostra os alertas abertos (carro encalhado, a receber parado, entrega atrasada, comparecimento baixo, sistema fora) — use quando perguntarem 'o que preciso resolver?'/'como está a operação?', e resolver_alerta p/ baixar um. anotar salva recado livre sem horário; listar_notas/resolver_nota gerenciam. pendências (listar_pendencias) mostra o que aguarda sua confirmação.
 OBS: agendamento, comparecimento, vendido e reservado vêm da PLANILHA — não dá pra editar por aqui; nesse caso oriente a corrigir na planilha.
 
 ESTILO: curto e direto, em português, valores como R$ 95.000, listas em linhas curtas com emojis discretos. \

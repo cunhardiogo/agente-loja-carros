@@ -7,7 +7,7 @@ from datetime import timedelta
 from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from . import confirmacao, consulta, datas, db, evolution, ingest, media, planilha
+from . import confirmacao, consulta, datas, db, evolution, ingest, media, planilha, supervisor
 from .config import settings
 
 logging.basicConfig(level=logging.INFO)
@@ -46,6 +46,7 @@ def _tick() -> None:
     _ult_lembrete["t"] = _time.time()
     _disparar_lembretes()
     _reaper_eventos()
+    _radar()
     _checar_lojasb()
     _checar_relatorios()
     if _time.time() - _ult_planilha["t"] > 600:  # sync da planilha a cada ~10 min
@@ -119,6 +120,29 @@ def _reaper_eventos() -> int:
     return n
 
 
+_ult_radar = {"t": 0.0}
+
+
+def _radar() -> None:
+    """Supervisor proativo. A cada ~10min reavalia as regras e manda CRÍTICOS na hora.
+    Nas janelas 10:30 e 16:30 manda o digest completo dos alertas abertos (1x por slot)."""
+    if _time.time() - _ult_radar["t"] <= 600:
+        return
+    _ult_radar["t"] = _time.time()
+    now = datas.agora()
+    hhmm = now.strftime("%H:%M")
+    hoje = now.date().isoformat()
+    slot = "radar_manha" if "10:30" <= hhmm <= "11:29" else ("radar_tarde" if "16:30" <= hhmm <= "17:29" else None)
+    try:
+        if slot and not _ja_enviado(slot, hoje):
+            supervisor.disparar_radar(forcar=True)   # digest completo
+            _marcar_enviado(slot, hoje)
+        else:
+            supervisor.disparar_radar(forcar=False)  # só crítico novo fura na hora
+    except Exception:
+        log.exception("erro no radar")
+
+
 def _disparar_lembretes() -> int:
     agora = datas.agora().isoformat()
     rows = db.select("lembretes", {"select": "id,numero,texto", "enviado": "eq.false",
@@ -175,7 +199,20 @@ def _checar_relatorios() -> None:
                 planilha.sincronizar()
             except Exception:
                 pass
-            evolution.enviar_relatorio(fn())
+            texto = fn()
+            # análise da IA anexada ao fechamento (diário) e ao semanal
+            try:
+                if tipo == "fechamento":
+                    ins = supervisor.gerar_insight("diario")
+                    if ins:
+                        texto += f"\n\n🧠 *Leitura do dia:*\n{ins}"
+                elif tipo == "semanal":
+                    ins = supervisor.gerar_insight("semanal")
+                    if ins:
+                        texto += f"\n\n🧠 *Leitura da semana:*\n{ins}"
+            except Exception:
+                log.exception("erro anexando insight")
+            evolution.enviar_relatorio(texto)
             _marcar_enviado(tipo, hoje)
         except Exception:
             log.exception("erro enviando relatório %s", tipo)
