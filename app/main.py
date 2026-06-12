@@ -7,7 +7,7 @@ from datetime import timedelta
 from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from . import confirmacao, consulta, datas, db, evolution, ingest, media, planilha, supervisor
+from . import confirmacao, consulta, datas, db, evolution, ingest, media, meta_ads, planilha, supervisor
 from .config import settings
 
 logging.basicConfig(level=logging.INFO)
@@ -200,6 +200,12 @@ def _checar_relatorios() -> None:
             except Exception:
                 pass
             texto = fn()
+            # Meta Ads anexado ao fechamento e ao semanal
+            if tipo in ("fechamento", "semanal"):
+                try:
+                    texto += _meta_ads_linha("semana" if tipo == "fechamento" else "semana")
+                except Exception:
+                    log.exception("erro anexando meta ads")
             # análise da IA anexada ao fechamento (diário) e ao semanal
             try:
                 if tipo == "fechamento":
@@ -320,6 +326,19 @@ def _consulta(pergunta: str, numero: str):
 
 
 # ===== Dashboard (servido pela própria Render) =====
+def _meta_ads_linha(periodo: str) -> str:
+    if not meta_ads.configurado():
+        return ""
+    r = meta_ads.resumo(periodo)
+    if r.get("erro"):
+        return ""
+    cpl = f" · CPL {_brl(r['custo_por_lead'])}" if r.get("custo_por_lead") else ""
+    ro = meta_ads.roas("mes")
+    roas_txt = f" · ROAS {ro['roas']}x" if not ro.get("erro") and ro.get("roas") is not None else ""
+    return (f"\n\n📲 *Meta Ads (7d):* {_brl(r['gasto'])} gasto · {r['leads']} leads · "
+            f"{r['conversas']} conversas{cpl}{roas_txt}")
+
+
 def _ultimo_insight() -> str:
     rows = db.select("insights", {"select": "conteudo", "periodo": "eq.diario",
                                   "order": "data.desc", "limit": "1"})
@@ -362,6 +381,12 @@ def _metrics() -> dict:
         "pendentes_itens": pendentes,
         "notas": supervisor.listar_notas()["notas"],
         "funil": _funil(),
+        # Fase 4 — metas, giro, recalls, Meta Ads
+        "metas": consulta.progresso_metas(),
+        "giro": consulta.giro_estoque(),
+        "recalls": consulta.listar_recalls(),
+        "meta_ads": meta_ads.resumo("semana") if meta_ads.configurado() else None,
+        "meta_roas": meta_ads.roas("mes") if meta_ads.configurado() else None,
     }
 
 

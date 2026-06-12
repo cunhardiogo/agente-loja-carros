@@ -31,6 +31,7 @@ def test_forcar_venda_ignora_dedup(monkeypatch):
     monkeypatch.setattr(ingest, "_venda_existente", lambda ext: {"id": "v1"})
     inseriu = {}
     monkeypatch.setattr(ingest, "resolver_pessoa", lambda *a, **k: None)
+    monkeypatch.setattr(ingest, "_linkar_veiculo", lambda ext, vid: None)
     monkeypatch.setattr(db, "insert", lambda t, d: inseriu.update(d) or {"id": "novo"})
     tabela, rid = ingest.aplicar(_ext(cliente_nome="Joao", modelo="Onix"), forcar_venda=True)
     assert tabela == "vendas" and rid == "novo"

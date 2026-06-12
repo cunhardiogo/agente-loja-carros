@@ -75,14 +75,22 @@
       <ul id="lista_pendentes" class="space-y-2 text-sm"></ul>
     </section>
 
-    <section class="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
+    <section class="bg-slate-800/60 rounded-xl p-4 border border-slate-700 mb-4">
       <h2 class="font-semibold mb-3">📝 Anotações (<span id="notas_qtd">0</span>)</h2>
       <ul id="lista_notas" class="text-sm divide-y divide-slate-700"></ul>
+    </section>
+    <section class="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
+      <h2 class="font-semibold mb-3">🔧 Recalls em aberto (<span id="recalls_qtd">0</span>)</h2>
+      <ul id="lista_recalls" class="text-sm divide-y divide-slate-700"></ul>
     </section>
   </div>
 
   <!-- ===== FUNIL ===== -->
   <div data-pane="funil" class="hidden">
+    <section class="bg-slate-800/60 rounded-xl p-4 border border-slate-700 mb-4">
+      <h2 class="font-semibold mb-3">🎯 Metas do mês</h2>
+      <div id="metas" class="space-y-3 text-sm"></div>
+    </section>
     <section class="bg-slate-800/60 rounded-xl p-4 border border-slate-700 mb-4">
       <h2 class="font-semibold mb-3">🔻 Funil do mês</h2>
       <div id="funil" class="space-y-2"></div>
@@ -127,6 +135,19 @@
         <p class="text-2xl font-bold text-sky-400" id="fin_over">—</p></div>
     </section>
     <section class="bg-slate-800/60 rounded-xl p-4 border border-slate-700 mb-4">
+      <h2 class="font-semibold mb-3" id="meta_ads_titulo">📲 Meta Ads (7 dias)</h2>
+      <div id="meta_ads_box" class="hidden">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center mb-3">
+          <div><p class="text-xl font-bold text-rose-300" id="ma_gasto">—</p><p class="text-[10px] text-slate-400">Gasto</p></div>
+          <div><p class="text-xl font-bold text-emerald-400" id="ma_leads">—</p><p class="text-[10px] text-slate-400">Leads</p></div>
+          <div><p class="text-xl font-bold text-sky-400" id="ma_cpl">—</p><p class="text-[10px] text-slate-400">Custo/lead</p></div>
+          <div><p class="text-xl font-bold text-indigo-300" id="ma_conversas">—</p><p class="text-[10px] text-slate-400">Conversas</p></div>
+        </div>
+        <p class="text-xs text-slate-400" id="ma_roas">—</p>
+      </div>
+      <p id="meta_ads_off" class="text-slate-500 text-sm">Meta Ads não conectado.</p>
+    </section>
+    <section class="bg-slate-800/60 rounded-xl p-4 border border-slate-700 mb-4">
       <h2 class="font-semibold mb-3">💰 A receber (detalhe)</h2>
       <ul id="lista_receber" class="text-sm divide-y divide-slate-700"></ul>
     </section>
@@ -140,6 +161,16 @@
 
   <!-- ===== ESTOQUE ===== -->
   <div data-pane="estoque" class="hidden">
+    <section class="bg-slate-800/60 rounded-xl p-4 border border-slate-700 mb-4">
+      <h2 class="font-semibold mb-3">⏱️ Giro do estoque — média <span id="giro_media" class="text-indigo-300">—</span> dias parado</h2>
+      <div class="grid grid-cols-4 gap-2 text-center mb-3">
+        <div><p class="text-lg font-bold text-emerald-400" id="giro_0">—</p><p class="text-[10px] text-slate-400">0-15d</p></div>
+        <div><p class="text-lg font-bold text-sky-400" id="giro_1">—</p><p class="text-[10px] text-slate-400">16-30d</p></div>
+        <div><p class="text-lg font-bold text-amber-400" id="giro_2">—</p><p class="text-[10px] text-slate-400">31-60d</p></div>
+        <div><p class="text-lg font-bold text-rose-400" id="giro_3">—</p><p class="text-[10px] text-slate-400">60+d</p></div>
+      </div>
+      <ul id="lista_giro" class="text-sm divide-y divide-slate-700"></ul>
+    </section>
     <section class="grid md:grid-cols-2 gap-4 mb-4">
       <div class="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
         <h2 class="font-semibold mb-3">🏷️ Carros a anunciar (<span id="estoque_qtd">0</span>)</h2>
@@ -320,6 +351,49 @@ function render(d){
     <td class="py-2 pr-3 text-emerald-400 font-semibold">${x.valor_avaliacao?brl(x.valor_avaliacao):'—'}</td>
     <td class="py-2 pr-3 text-slate-400">${x.carro_interesse||'—'}</td><td class="py-2 text-slate-400">${x.obs||''}</td></tr>`).join('')
     : '<tr><td colspan="7" class="py-2 text-slate-500">Nenhuma avaliação</td></tr>';
+
+  // ---- RECALLS (Radar) ----
+  const rc = (d.recalls && d.recalls.recalls) || [];
+  document.getElementById('recalls_qtd').textContent = rc.length;
+  lista('lista_recalls', rc, x=>`${x.cliente_nome||'—'} <span class="text-slate-500">${x.veiculo||''} ${x.placa||''}</span>${x.motivo?`<span class="float-right text-amber-400">${x.motivo}</span>`:''}`);
+
+  // ---- METAS (Funil) ----
+  const metas = (d.metas && d.metas.metas) || [];
+  const barra = (pct,cor)=>{const p=Math.min(pct||0,100);return `<div class="h-2 rounded bg-slate-700/50"><div class="h-2 rounded ${cor}" style="width:${p}%"></div></div>`;};
+  document.getElementById('metas').innerHTML = metas.length ? metas.map(m=>{
+    const quem = m.escopo==='loja' ? '🏪 Loja' : '👤 '+m.vendedor;
+    const blocos = [];
+    if(m.meta_vendas) blocos.push(`<div><div class="flex justify-between text-xs"><span>Vendas: ${m.vendas}/${m.meta_vendas}</span><span>${m.pct_vendas??0}%</span></div>${barra(m.pct_vendas,'bg-indigo-500')}</div>`);
+    if(m.meta_faturamento) blocos.push(`<div><div class="flex justify-between text-xs"><span>Faturamento: ${brl(m.faturamento)}/${brl(m.meta_faturamento)}</span><span>${m.pct_faturamento??0}%</span></div>${barra(m.pct_faturamento,'bg-emerald-500')}</div>`);
+    return `<div><p class="font-medium mb-1">${quem}</p><div class="space-y-2">${blocos.join('')||'<span class="text-slate-500 text-xs">sem alvo definido</span>'}</div></div>`;
+  }).join('') : '<p class="text-slate-500">Nenhuma meta definida. Peça no WhatsApp: "define meta de 15 carros e 1.5M esse mês".</p>';
+
+  // ---- GIRO (Estoque) ----
+  const g = d.giro || {};
+  document.getElementById('giro_media').textContent = g.tempo_medio_dias ?? '—';
+  const fx = g.faixas || {};
+  document.getElementById('giro_0').textContent = fx['0-15']||0;
+  document.getElementById('giro_1').textContent = fx['16-30']||0;
+  document.getElementById('giro_2').textContent = fx['31-60']||0;
+  document.getElementById('giro_3').textContent = fx['60+']||0;
+  lista('lista_giro', (g.mais_parados||[]).slice(0,8), x=>`${x.carro} <span class="float-right ${x.dias>30?'text-rose-400':'text-slate-400'}">${x.dias}d · ${x.status}</span>`);
+
+  // ---- META ADS (Financeiro) ----
+  const ma = d.meta_ads, box=document.getElementById('meta_ads_box'), off=document.getElementById('meta_ads_off');
+  if(ma && !ma.erro){
+    box.classList.remove('hidden'); off.classList.add('hidden');
+    document.getElementById('ma_gasto').textContent = brl(ma.gasto);
+    document.getElementById('ma_leads').textContent = ma.leads;
+    document.getElementById('ma_cpl').textContent = ma.custo_por_lead?brl(ma.custo_por_lead):'—';
+    document.getElementById('ma_conversas').textContent = ma.conversas;
+    const ro = d.meta_roas||{};
+    document.getElementById('ma_roas').textContent = (ro.roas!=null)
+      ? `ROAS tráfego (mês): ${ro.roas}x · ${ro.vendas_trafego||0} venda(s) · custo/venda ${ro.custo_por_venda?brl(ro.custo_por_venda):'—'}`
+      : 'Marque o canal "Tráfego" nas vendas pra ver ROAS.';
+  } else {
+    box.classList.add('hidden'); off.classList.remove('hidden');
+    off.textContent = ma && ma.erro ? ma.erro : 'Meta Ads não conectado.';
+  }
 
   const ts = new Date().toLocaleString('pt-BR');
   document.getElementById('atualizado').textContent = ts;

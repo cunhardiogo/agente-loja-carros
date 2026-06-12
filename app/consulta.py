@@ -11,7 +11,10 @@ from .ingest import resolver_pessoa
 
 log = logging.getLogger("agente")
 _http = httpx.Client(verify=settings.verify_ssl, timeout=60)
-_client = OpenAI(api_key=settings.openai_api_key, http_client=_http) if settings.openai_api_key else None
+_kwargs = {"api_key": settings.openai_api_key, "http_client": _http}
+if settings.openai_base_url:  # LLM plugável: endpoint compatível-OpenAI
+    _kwargs["base_url"] = settings.openai_base_url
+_client = OpenAI(**_kwargs) if settings.openai_api_key else None
 
 _ctx = {"numero": None}  # quem está conversando (p/ lembretes irem pra pessoa certa)
 
@@ -467,7 +470,138 @@ def resolver_nota(termo: str) -> dict:
     return supervisor.resolver_nota(termo)
 
 
+def giro_estoque() -> dict:
+    """Tempo que os carros estão parados no estoque (a anunciar/anunciado/reservado)."""
+    rows = db.select_all("veiculos", {"select": "marca,modelo,versao,status,created_at,data_anuncio",
+                                      "status": "in.(a_anunciar,anunciado,reservado)"})
+    hoje = datas.agora()
+
+    def idade(r):
+        base = r.get("data_anuncio") or r.get("created_at")
+        if not base:
+            return None
+        try:
+            dt = datetime.fromisoformat(base.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=hoje.tzinfo)
+        return (hoje - dt).days
+
+    faixas = {"0-15": 0, "16-30": 0, "31-60": 0, "60+": 0}
+    itens = []
+    for r in rows:
+        d = idade(r)
+        if d is None:
+            continue
+        k = "0-15" if d <= 15 else "16-30" if d <= 30 else "31-60" if d <= 60 else "60+"
+        faixas[k] += 1
+        itens.append({"carro": " ".join(x for x in (r.get("marca"), r.get("modelo"), r.get("versao")) if x),
+                      "dias": d, "status": r.get("status")})
+    itens.sort(key=lambda x: x["dias"], reverse=True)
+    dias = [i["dias"] for i in itens]
+    return {"em_estoque": len(itens), "tempo_medio_dias": round(sum(dias) / len(dias)) if dias else 0,
+            "faixas": faixas, "mais_parados": itens[:10]}
+
+
+def margem_estoque(periodo: str = "mes") -> dict:
+    """Margem real (valor de venda − custo) das vendas ligadas a um carro do estoque."""
+    ini, fim = _resolve(periodo)
+    vendas = [v for v in db.select_all("vendas", {"select": "valor_venda,data_venda,veiculo_id"})
+              if _dentro(v.get("data_venda"), ini, fim)]
+    custos = {x["id"]: x.get("preco_custo")
+              for x in db.select_all("veiculos", {"select": "id,preco_custo"})}
+    total = com_custo = 0
+    for v in vendas:
+        custo = custos.get(v.get("veiculo_id"))
+        if custo and v.get("valor_venda"):
+            total += v["valor_venda"] - custo
+            com_custo += 1
+    return {"periodo": periodo, "vendas": len(vendas), "com_custo_conhecido": com_custo,
+            "margem_total": round(total), "margem_media": round(total / com_custo) if com_custo else 0}
+
+
+def definir_meta(meta_vendas: int | None = None, meta_faturamento: float | None = None,
+                 vendedor: str | None = None, mes: str | None = None) -> dict:
+    """Define/atualiza a meta do mês (da loja ou de um vendedor)."""
+    mref = (mes or datas.hoje_iso())[:7] + "-01"
+    escopo = "vendedor" if vendedor else "loja"
+    vid = None
+    if vendedor:
+        v = resolver_pessoa(vendedor, "vendedor")
+        if not v:
+            return {"erro": f"vendedor '{vendedor}' não encontrado"}
+        vid = v["id"]
+    filtro = {"select": "id", "escopo": f"eq.{escopo}", "mes": f"eq.{mref}", "limit": "1",
+              "vendedor_id": f"eq.{vid}" if vid else "is.null"}
+    dados = {"escopo": escopo, "vendedor_id": vid, "mes": mref,
+             "meta_vendas": meta_vendas, "meta_faturamento": meta_faturamento}
+    existe = db.select("metas", filtro)
+    if existe:
+        db.update("metas", dados, {"id": f"eq.{existe[0]['id']}"})
+    else:
+        db.insert("metas", dados)
+    return {"ok": True, "escopo": escopo, "vendedor": vendedor, "mes": mref,
+            "meta_vendas": meta_vendas, "meta_faturamento": meta_faturamento}
+
+
+def progresso_metas(mes: str | None = None) -> dict:
+    """Quanto já foi realizado das metas do mês (loja e vendedores)."""
+    mref = (mes or datas.hoje_iso())[:7] + "-01"
+    metas = db.select_all("metas", {"select": "escopo,vendedor_id,meta_vendas,meta_faturamento",
+                                    "mes": f"eq.{mref}"})
+    if not metas:
+        return {"mes": mref, "metas": [], "aviso": "nenhuma meta definida — use definir_meta"}
+    fat = resumo_vendas("mes").get("valor_total", 0)
+    vdd = vendidos("mes")["quantidade"]
+    rank = {r["vendedor"]: r for r in ranking_vendedores("mes")["ranking"]}
+    nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
+
+    def pct(real, meta):
+        return round(real / meta * 100) if meta else None
+
+    out = []
+    for m in metas:
+        if m["escopo"] == "loja":
+            out.append({"escopo": "loja", "meta_vendas": m.get("meta_vendas"), "vendas": vdd,
+                        "pct_vendas": pct(vdd, m.get("meta_vendas")),
+                        "meta_faturamento": m.get("meta_faturamento"), "faturamento": fat,
+                        "pct_faturamento": pct(fat, m.get("meta_faturamento"))})
+        else:
+            nome = nomes.get(m["vendedor_id"], "—")
+            r = rank.get(nome, {})
+            out.append({"escopo": "vendedor", "vendedor": nome,
+                        "meta_vendas": m.get("meta_vendas"), "vendas": r.get("quantidade", 0),
+                        "pct_vendas": pct(r.get("quantidade", 0), m.get("meta_vendas")),
+                        "meta_faturamento": m.get("meta_faturamento"), "faturamento": r.get("valor_total", 0),
+                        "pct_faturamento": pct(r.get("valor_total", 0), m.get("meta_faturamento"))})
+    return {"mes": mref, "metas": out}
+
+
+def listar_recalls() -> dict:
+    rows = db.select_all("recalls", {"select": "cliente_nome,veiculo,placa,motivo,created_at",
+                                     "status": "eq.aberto", "order": "created_at.desc"})
+    return {"quantidade": len(rows), "recalls": rows}
+
+
+def meta_ads_resumo(periodo: str = "semana") -> dict:
+    from . import meta_ads
+    return meta_ads.resumo(periodo)
+
+
+def meta_ads_roas(periodo: str = "mes") -> dict:
+    from . import meta_ads
+    return meta_ads.roas(periodo)
+
+
 DISPATCH = {
+    "giro_estoque": giro_estoque,
+    "margem_estoque": margem_estoque,
+    "definir_meta": definir_meta,
+    "progresso_metas": progresso_metas,
+    "listar_recalls": listar_recalls,
+    "meta_ads_resumo": meta_ads_resumo,
+    "meta_ads_roas": meta_ads_roas,
     "listar_pendencias": listar_pendencias,
     "radar": radar,
     "resolver_alerta": resolver_alerta,
@@ -661,6 +795,45 @@ TOOLS = [
     {"type": "function", "function": {
         "name": "listar_avaliacoes",
         "description": "Avaliações de carros (troca) num período, com FIPE e valor avaliado.",
+        "parameters": {"type": "object", "properties": {"periodo": _PERIODO}},
+    }},
+    {"type": "function", "function": {
+        "name": "giro_estoque",
+        "description": "Tempo de giro do estoque: quantos dias cada carro está parado (a anunciar/anunciado/reservado), média e os mais parados.",
+        "parameters": {"type": "object", "properties": {}},
+    }},
+    {"type": "function", "function": {
+        "name": "margem_estoque",
+        "description": "Margem real (venda − custo) das vendas ligadas a um carro do estoque, num período.",
+        "parameters": {"type": "object", "properties": {"periodo": _PERIODO}},
+    }},
+    {"type": "function", "function": {
+        "name": "definir_meta",
+        "description": "Define ou atualiza a meta do mês — da loja ou de um vendedor (meta de vendas e/ou faturamento).",
+        "parameters": {"type": "object", "properties": {
+            "meta_vendas": {"type": "integer", "description": "Qtd de carros alvo no mês"},
+            "meta_faturamento": {"type": "number", "description": "Faturamento alvo em R$"},
+            "vendedor": {"type": "string", "description": "Nome do vendedor (vazio = meta da loja)"},
+            "mes": {"type": "string", "description": "Mês ISO YYYY-MM (vazio = mês atual)"}}},
+    }},
+    {"type": "function", "function": {
+        "name": "progresso_metas",
+        "description": "Quanto já foi realizado das metas do mês (loja e vendedores), em % e valores.",
+        "parameters": {"type": "object", "properties": {"mes": {"type": "string", "description": "Mês ISO YYYY-MM (opcional)"}}},
+    }},
+    {"type": "function", "function": {
+        "name": "listar_recalls",
+        "description": "Recalls/retornos de clientes em aberto (grupo RECALL): cliente, veículo e motivo.",
+        "parameters": {"type": "object", "properties": {}},
+    }},
+    {"type": "function", "function": {
+        "name": "meta_ads_resumo",
+        "description": "Resumo do Meta Ads no período: gasto, impressões, cliques, leads, conversas no WhatsApp e custo por lead.",
+        "parameters": {"type": "object", "properties": {"periodo": {"type": "string", "enum": ["hoje", "ontem", "semana", "mes", "7d", "30d"]}}},
+    }},
+    {"type": "function", "function": {
+        "name": "meta_ads_roas",
+        "description": "Cruza o gasto do Meta Ads com o faturamento/vendas do canal Tráfego (ROAS e custo por venda).",
         "parameters": {"type": "object", "properties": {"periodo": _PERIODO}},
     }},
 ]

@@ -10,6 +10,12 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_model_extracao: str = "gpt-4.1-mini"
     openai_model_consulta: str = "gpt-4.1"
+    # LLM plugável: base_url compatível-OpenAI (OpenRouter/Together/local etc.). Vazio = OpenAI padrão.
+    openai_base_url: str = ""
+
+    # Meta Ads (cruzamento gasto/leads x vendas do canal Tráfego)
+    meta_token: str = ""
+    meta_ad_account: str = ""  # ex: act_3259576197605298
 
     evolution_url: str = ""
     # Coletor: lê os grupos (diogo4895)

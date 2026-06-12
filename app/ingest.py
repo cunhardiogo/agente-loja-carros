@@ -161,6 +161,32 @@ def _agendamento_recente(cliente: str | None) -> dict | None:
     return rows[0] if rows else None
 
 
+def _linkar_veiculo(ext: Extracao, venda_id: str | None) -> None:
+    """Liga a venda ao veículo do estoque (p/ giro e margem) e marca o carro como vendido.
+    Casa por placa; senão por tokens de modelo/versão. Silencioso se não achar."""
+    if not venda_id:
+        return
+    cand = db.select_all("veiculos", {
+        "select": "id,modelo,versao,placa,status",
+        "status": "in.(a_anunciar,anunciado,reservado)"})
+    if not cand:
+        return
+    alvo = None
+    if ext.placa:
+        p = _norm(ext.placa).replace("-", "")
+        alvo = next((v for v in cand if p and p in _norm(v.get("placa")).replace("-", "")), None)
+    if not alvo:
+        toks = _tokens_veiculo(ext)
+        casados = [v for v in cand
+                   if any(tok in _norm(f"{v.get('modelo', '')} {v.get('versao', '')}").replace("-", "") for tok in toks)]
+        if len(casados) == 1:
+            alvo = casados[0]
+    if not alvo:
+        return
+    db.update("vendas", {"veiculo_id": alvo["id"]}, {"id": f"eq.{venda_id}"})
+    db.update("veiculos", {"status": "vendido"}, {"id": f"eq.{alvo['id']}"})
+
+
 # ===== ações (INSERT/UPDATE). Retornam (tabela, registro_id). =====
 def aplicar(ext: Extracao, forcar_venda: bool = False) -> tuple[str | None, str | None]:
     t = ext.tipo_evento
@@ -193,6 +219,7 @@ def aplicar(ext: Extracao, forcar_venda: bool = False) -> tuple[str | None, str 
             "data_entrega_prevista": ext.data_entrega,
             "observacoes": ext.obs or ext.veiculo_descricao,
         })
+        _linkar_veiculo(ext, row.get("id"))
         return "vendas", row.get("id")
 
     if t == TipoEvento.avaliacao:
@@ -283,6 +310,15 @@ def aplicar(ext: Extracao, forcar_venda: bool = False) -> tuple[str | None, str 
         compareceu = ext.compareceu if ext.compareceu is not None else True
         db.update("agendamentos", {"compareceu": compareceu}, {"id": f"eq.{a['id']}"})
         return "agendamentos", a["id"]
+
+    if t == TipoEvento.recall:
+        veic = ext.veiculo_texto or ext.veiculo_descricao or \
+            " ".join(x for x in (ext.modelo, ext.versao) if x) or None
+        row = db.insert("recalls", {
+            "cliente_nome": ext.cliente_nome, "veiculo": veic, "placa": ext.placa,
+            "motivo": ext.motivo or ext.obs or ext.resumo, "observacao": ext.observacao,
+        })
+        return "recalls", row.get("id")
 
     return None, None
 

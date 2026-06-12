@@ -13,6 +13,7 @@ class TipoEvento(str, Enum):
     pagamento = "pagamento"
     entrega = "entrega"               # confirmação de que um carro foi entregue
     entrega_agendada = "entrega_agendada"  # item da lista do grupo de ENTREGAS
+    recall = "recall"                 # grupo RECALL: revisão/retorno de cliente
     nenhum = "nenhum"
 
 
@@ -102,3 +103,4 @@ class Extracao(BaseModel):
     # entrega agendada (lista do grupo de entregas)
     veiculo_texto: str | None = Field(None, description="Veículo como escrito, ex 'ASX 2015 KPY-6D44'")
     observacao: str | None = None
+    motivo: str | None = Field(None, description="Motivo do recall/retorno (ex: revisão, barulho, garantia)")

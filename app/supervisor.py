@@ -194,9 +194,32 @@ def _r10_avaliacao_sem_desfecho() -> list:
     return out
 
 
+def _r11_meta_em_risco() -> list:
+    """Meta da loja em risco: ritmo abaixo do necessário passada a metade do mês."""
+    import calendar
+    from . import consulta
+    hoje = datas.hoje()
+    dias_mes = calendar.monthrange(hoje.year, hoje.month)[1]
+    if hoje.day < dias_mes // 2:  # só cobra da metade do mês em diante
+        return []
+    prog = consulta.progresso_metas()
+    loja = next((m for m in prog.get("metas", []) if m.get("escopo") == "loja"), None)
+    if not loja:
+        return []
+    esperado = hoje.day / dias_mes * 100  # % do mês decorrido
+    out = []
+    for rotulo, real_pct, alvo in (("vendas", loja.get("pct_vendas"), loja.get("meta_vendas")),
+                                   ("faturamento", loja.get("pct_faturamento"), loja.get("meta_faturamento"))):
+        if alvo and real_pct is not None and real_pct < esperado - 15:
+            out.append(_alerta("R11", f"meta:{rotulo}:{hoje.strftime('%Y-%m')}", "aviso",
+                               f"Meta de {rotulo} em risco: {real_pct:.0f}% no dia {hoje.day}/{dias_mes}",
+                               f"Esperado ~{esperado:.0f}% do mês. Acelerar pra bater a meta.", None, None))
+    return out
+
+
 REGRAS = [_r1_a_anunciar, _r2_anunciado_encalhado, _r3_venda_sem_pagamento, _r4_entrega_vencida,
           _r5_venda_sem_vendedor, _r6_reserva_parada, _r7_comparecimento_baixo, _r8_captacao_fraca,
-          _r9_sem_vendas, _r10_avaliacao_sem_desfecho]
+          _r9_sem_vendas, _r10_avaliacao_sem_desfecho, _r11_meta_em_risco]
 
 
 # ===== W1..W5 (saúde do sistema) =====
@@ -240,6 +263,19 @@ def _w_watchdog() -> list:
         out.append(_alerta("W5", f"pendentes:{ag.date().isoformat()}", "aviso",
                            f"{len(pend)} registros aguardando sua confirmação",
                            "Responda as pendências (use 'pendências') p/ não perder dados.", None, None))
+    # W6 token do Meta Ads expirando/expirado
+    from . import meta_ads
+    if meta_ads.configurado():
+        st = meta_ads.token_status()
+        exp = st.get("expira_em") or 0
+        falta = (exp - ag.timestamp()) / 86400 if exp else None
+        if not st.get("ok"):
+            out.append(_alerta("W6", "meta_token", "critico", "Token do Meta Ads inválido",
+                               "Renove o META_TOKEN — sem ele não dá pra puxar gasto/leads.", None, None))
+        elif falta is not None and falta <= 7:
+            out.append(_alerta("W6", f"meta_token:{ag.date().isoformat()}", "aviso",
+                               f"Token do Meta Ads expira em {int(falta)} dia(s)",
+                               "Renove o META_TOKEN antes de vencer.", None, None))
     return out
 
 

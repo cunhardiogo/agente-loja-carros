@@ -10,7 +10,7 @@ do $$ begin create type vendedor_funcao as enum ('vendedor','sdr','gerente'); ex
 do $$ begin create type veiculo_status as enum ('a_anunciar','anunciado','reservado','vendido','entregue','inativo'); exception when duplicate_object then null; end $$;
 do $$ begin create type pagamento_status as enum ('pendente','parcial','pago'); exception when duplicate_object then null; end $$;
 do $$ begin create type entrega_status as enum ('pendente','entregue'); exception when duplicate_object then null; end $$;
-do $$ begin create type evento_tipo as enum ('venda','avaliacao','agendamento','comparecimento','anuncio','anuncio_publicado','pagamento','entrega','entrega_agendada','nenhum'); exception when duplicate_object then null; end $$;
+do $$ begin create type evento_tipo as enum ('venda','avaliacao','agendamento','comparecimento','anuncio','anuncio_publicado','pagamento','entrega','entrega_agendada','recall','nenhum'); exception when duplicate_object then null; end $$;
 do $$ begin create type evento_status as enum ('processando','auto','pendente_confirmacao','confirmado','descartado','ignorado_planilha','erro'); exception when duplicate_object then null; end $$;
 
 create or replace function set_updated_at() returns trigger as $$
@@ -196,3 +196,26 @@ create table if not exists notas (
   created_at timestamptz not null default now()
 );
 create index if not exists idx_notas_abertas on notas(resolvida, created_at);
+
+-- ===== metas (por loja ou vendedor, por mês) =====
+create table if not exists metas (
+  id uuid primary key default gen_random_uuid(),
+  escopo text not null default 'loja',
+  vendedor_id uuid references vendedores(id) on delete cascade,
+  mes date not null,
+  meta_vendas integer, meta_faturamento numeric(12,2),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists idx_metas_mes on metas(mes);
+drop trigger if exists trg_metas_updated on metas;
+create trigger trg_metas_updated before update on metas for each row execute function set_updated_at();
+
+-- ===== recalls (grupo RECALL) =====
+create table if not exists recalls (
+  id uuid primary key default gen_random_uuid(),
+  cliente_nome text, veiculo text, placa text, motivo text,
+  status text not null default 'aberto', observacao text,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_recalls_status on recalls(status);

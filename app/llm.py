@@ -8,7 +8,10 @@ from .config import settings
 from .schemas import Extracao
 
 _http = httpx.Client(verify=settings.verify_ssl, timeout=60)
-_client = OpenAI(api_key=settings.openai_api_key, http_client=_http) if settings.openai_api_key else None
+_kwargs = {"api_key": settings.openai_api_key, "http_client": _http}
+if settings.openai_base_url:  # LLM plugável: endpoint compatível-OpenAI
+    _kwargs["base_url"] = settings.openai_base_url
+_client = OpenAI(**_kwargs) if settings.openai_api_key else None
 
 SYSTEM = """Você lê mensagens dos grupos de WhatsApp de uma loja de carros (Grupo SB) e extrai \
 eventos de negócio de forma estruturada. As mensagens podem ser conversa livre OU formulários padronizados \
@@ -31,6 +34,7 @@ veiculo_texto (ex 'ASX 2015 KPY-6D44'), placa, observacao. Se tiver VÁRIAS, ext
 - pagamento: avisa que uma venda foi paga (ex 'pagamento do HRV', 'Onix quitado'). Capture cliente_nome E o veículo (modelo/veiculo_descricao/placa) pra localizar a venda.
 - entrega: avisa que um carro JÁ foi entregue (ex 'Onix entregue', 'entreguei o do João'). Capture cliente_nome E o veículo (modelo/veiculo_descricao/placa).
 - comparecimento: avisa se um cliente compareceu ou faltou na visita (ex 'Não veio', 'Veio mas não fechou', 'compareceu'). compareceu=false se NÃO veio/faltou; true se veio/compareceu. Capture cliente_nome — se a mensagem for resposta a outra (contexto '[Em resposta a: ...]'), pegue o cliente/carro dali.
+- recall: SÓ no grupo RECALL — cliente chamado pra revisão/retorno/garantia, ou retorno pós-venda (ex 'chamar o cliente do Onix pra revisão', 'recall do airbag', 'cliente voltou reclamando de barulho'). Capture cliente_nome, veículo (modelo/placa/veiculo_texto) e motivo.
 - nenhum: bate-papo, instruções operacionais, bom dia, figurinha, sem evento de negócio.
 
 Regras:
