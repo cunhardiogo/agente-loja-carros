@@ -298,9 +298,14 @@ def aplicar(ext: Extracao, forcar_venda: bool = False) -> tuple[str | None, str 
         v = _venda_pendente(ext, "status_entrega")
         if not v:
             return None, None
-        db.update("vendas", {"status_entrega": "entregue", "data_entrega_real": datas.hoje_iso(),
-                             "status_pagamento": "pago"},  # entrega = quitado
-                  {"id": f"eq.{v['id']}"})
+        dados = {"status_entrega": "entregue", "data_entrega_real": datas.hoje_iso()}
+        det = db.select("vendas", {"select": "valor_total,valor_venda,valor_entrada",
+                                   "id": f"eq.{v['id']}", "limit": "1"})
+        d0 = det[0] if det else {}
+        saldo = (d0.get("valor_total") or d0.get("valor_venda") or 0) - (d0.get("valor_entrada") or 0)
+        if saldo <= 0:  # só quita automático se não há saldo (financiamento pode não ter caído)
+            dados["status_pagamento"] = "pago"
+        db.update("vendas", dados, {"id": f"eq.{v['id']}"})
         return "vendas", v["id"]
 
     if t == TipoEvento.comparecimento:

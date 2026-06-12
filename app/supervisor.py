@@ -177,15 +177,17 @@ def _r10_avaliacao_sem_desfecho() -> list:
     desde = (datas.agora() - timedelta(days=10)).isoformat()
     avs = db.select_all("avaliacoes", {"select": "id,modelo,versao,created_at,carro_troca",
                                        "created_at": f"gte.{desde}"})
-    vendas = db.select_all("vendas", {"select": "modelo", "created_at": f"gte.{desde}"})
-    modelos_vendidos = {(v.get("modelo") or "").strip().lower() for v in vendas}
+    # a avaliação é o carro do cliente (troca). Se ele fechou, a venda tem troca_modelo ~ esse carro.
+    # Comparar com vendas.modelo (carro comprado) era errado e dava falso positivo eterno.
+    vendas = db.select_all("vendas", {"select": "troca_modelo", "created_at": f"gte.{desde}"})
+    trocas = " | ".join((v.get("troca_modelo") or "").strip().lower() for v in vendas if v.get("troca_modelo"))
     out = []
     for a in avs:
         d = _idade_dias(a.get("created_at"))
         if d is None or d < 4:
             continue
         modelo = (a.get("modelo") or a.get("carro_troca") or "").strip().lower()
-        if modelo and modelo in modelos_vendidos:
+        if modelo and modelo in trocas:  # esse carro já entrou como troca numa venda
             continue
         nome = " ".join(x for x in (a.get("modelo"), a.get("versao")) if x) or "veículo"
         out.append(_alerta("R10", f"avaliacao:{a['id']}", "info",
@@ -295,10 +297,25 @@ def avaliar(com_watchdog: bool = True) -> list:
     return alertas
 
 
+DIAS_SNOOZE = 3  # alerta resolvido não renasce por N dias (evita spam de enxugar gelo)
+
+
+def _silenciados() -> set:
+    """(tipo,chave) resolvidos há menos de DIAS_SNOOZE — não recriar ainda."""
+    desde = (datas.agora() - timedelta(days=DIAS_SNOOZE)).isoformat()
+    rows = db.select_all("alertas", {"select": "tipo,chave,resolved_at", "status": "eq.resolvido",
+                                     "resolved_at": f"gte.{desde}"})
+    return {(r["tipo"], r["chave"]) for r in rows}
+
+
 def persistir(alertas: list) -> int:
-    """Grava os alertas novos; o índice único (tipo,chave) where aberto evita repetir."""
+    """Grava os alertas novos; o índice único (tipo,chave) where aberto evita repetir,
+    e o snooze evita recriar o que o dono acabou de resolver."""
+    silenciados = _silenciados()
     n = 0
     for a in alertas:
+        if (a["tipo"], a["chave"]) in silenciados:
+            continue
         if db.insert_lock("alertas", a) is not None:
             n += 1
     return n

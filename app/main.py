@@ -47,9 +47,20 @@ import time as _time
 _ult_lembrete = {"t": 0.0}
 _ult_planilha = {"t": 0.0}
 _lojasb_ok = {"v": True}
+_tick_lock = threading.Lock()
 
 
 def _tick() -> None:
+    # serializa: o loop interno e um GET /health podem disparar juntos
+    if not _tick_lock.acquire(blocking=False):
+        return
+    try:
+        _tick_inner()
+    finally:
+        _tick_lock.release()
+
+
+def _tick_inner() -> None:
     if _time.time() - _ult_lembrete["t"] <= 55:
         return
     _ult_lembrete["t"] = _time.time()
@@ -183,6 +194,16 @@ def _marcar_enviado(tipo: str, data: str) -> None:
         pass
 
 
+def _reservar_envio(tipo: str, data: str) -> bool:
+    """Trava atômica: insere o marcador (PK tipo+data) ANTES de enviar. Se já existe
+    (outra execução pegou), o INSERT falha e devolvemos False → não duplica relatório."""
+    try:
+        db.insert("relatorios_enviados", {"tipo": tipo, "data": data})
+        return True
+    except Exception:
+        return False
+
+
 def _jobs_relatorio(dow: int, hhmm: str) -> list:
     """Relatórios elegíveis AGORA. Cada um tem uma JANELA [inicio, fim]: fora dela
     não dispara (evita mandar a agenda da manhã às 23h quando o app ficou fora)."""
@@ -205,7 +226,7 @@ def _checar_relatorios() -> None:
     dow = now.weekday()  # 0=segunda ... 6=domingo
     hoje = now.date().isoformat()
     for tipo, fn in _jobs_relatorio(dow, hhmm):
-        if _ja_enviado(tipo, hoje):
+        if not _reservar_envio(tipo, hoje):  # reserva ANTES de enviar (anti-duplicado)
             continue
         try:
             try:
@@ -213,10 +234,10 @@ def _checar_relatorios() -> None:
             except Exception:
                 pass
             texto = fn()
-            # Meta Ads anexado ao fechamento e ao semanal
+            # Meta Ads anexado ao fechamento (dia) e ao semanal (7d)
             if tipo in ("fechamento", "semanal"):
                 try:
-                    texto += _meta_ads_linha("semana" if tipo == "fechamento" else "semana")
+                    texto += _meta_ads_linha("hoje" if tipo == "fechamento" else "semana")
                 except Exception:
                     log.exception("erro anexando meta ads")
             # análise da IA anexada ao fechamento (diário) e ao semanal
@@ -232,9 +253,9 @@ def _checar_relatorios() -> None:
             except Exception:
                 log.exception("erro anexando insight")
             evolution.enviar_relatorio(texto)
-            _marcar_enviado(tipo, hoje)
         except Exception:
             log.exception("erro enviando relatório %s", tipo)
+            db.delete("relatorios_enviados", {"tipo": f"eq.{tipo}", "data": f"eq.{hoje}"})  # libera p/ retry
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
@@ -345,10 +366,11 @@ def _meta_ads_linha(periodo: str) -> str:
     r = meta_ads.resumo(periodo)
     if r.get("erro"):
         return ""
+    rotulo = {"hoje": "hoje", "ontem": "ontem", "semana": "7d", "mes": "mês", "30d": "30d"}.get(periodo, periodo)
     cpl = f" · CPL {_brl(r['custo_por_lead'])}" if r.get("custo_por_lead") else ""
     ro = meta_ads.roas("mes")
     roas_txt = f" · ROAS {ro['roas']}x" if not ro.get("erro") and ro.get("roas") is not None else ""
-    return (f"\n\n📲 *Meta Ads (7d):* {_brl(r['gasto'])} gasto · {r['leads']} leads · "
+    return (f"\n\n📲 *Meta Ads ({rotulo}):* {_brl(r['gasto'])} gasto · {r['leads']} leads · "
             f"{r['conversas']} conversas{cpl}{roas_txt}")
 
 
@@ -361,13 +383,27 @@ def _ultimo_insight() -> str:
 def _funil() -> dict:
     ag = consulta.resumo_agendamentos("mes")
     vendidos = consulta.vendidos("mes")["quantidade"]
+    mes = datas.hoje_iso()[:7]  # entregues DO MÊS (antes contava a história toda)
     vl = consulta.lista_vendas("tudo")
-    entregues = sum(1 for x in vl.get("vendas", []) if x.get("status_entrega") == "entregue")
+    entregues = sum(1 for x in vl.get("vendas", [])
+                    if x.get("status_entrega") == "entregue" and (x.get("data_entrega_real") or "")[:7] == mes)
     return {"agendados": ag["total"], "compareceram": ag["compareceram"],
             "vendidos": vendidos, "entregues": entregues}
 
 
+_metrics_cache = {"t": 0.0, "v": None}
+
+
 def _metrics() -> dict:
+    # cache curto: o dashboard atualiza a cada 60s e isto faz dezenas de queries
+    if _metrics_cache["v"] is not None and _time.time() - _metrics_cache["t"] < 45:
+        return _metrics_cache["v"]
+    v = _metrics_calc()
+    _metrics_cache.update(t=_time.time(), v=v)
+    return v
+
+
+def _metrics_calc() -> dict:
     a_receber = consulta.pendencias("pagamento")
     a_entregar = consulta.pendencias("entrega")
     pendentes = confirmacao.pendentes_itens()

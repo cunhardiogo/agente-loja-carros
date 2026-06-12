@@ -280,55 +280,87 @@ def listar_avaliacoes(periodo: str = "mes") -> dict:
     return {"periodo": periodo, "quantidade": len(rows), "avaliacoes": rows}
 
 
-def _match(rows, termo, campos):
-    t = (termo or "").strip().lower()
-    if not t:
-        return None
+def _matches_venda(rows, cliente, veiculo):
+    """Casa por cliente E veículo (cada um opcional). Diferente do match antigo (OR
+    no primeiro hit), retorna TODAS as vendas que batem — pra exigir unicidade."""
+    c = (cliente or "").strip().lower()
+    v = (veiculo or "").strip().lower()
+    out = []
     for r in rows:
-        alvo = " ".join(str(r.get(c)) for c in campos if r.get(c)).lower()
-        if t in alvo:
-            return r
-    return None
+        nome = (r.get("cliente_nome") or "").lower()
+        carro = f"{r.get('modelo', '') or ''} {r.get('versao', '') or ''}".lower()
+        if (c or v) and (c in nome if c else True) and (v in carro if v else True):
+            out.append(r)
+    return out
+
+
+def _venda_unica(rows, cliente, veiculo, descricao):
+    """Devolve (venda, None) se única; (None, msg_erro) se nenhuma ou ambígua."""
+    m = _matches_venda(rows, cliente, veiculo)
+    termo = " ".join(x for x in (cliente, veiculo) if x)
+    if not m:
+        return None, {"erro": f"não achei {descricao} com '{termo}'"}
+    if len(m) > 1:
+        nomes = ", ".join(f"{x.get('cliente_nome') or '?'} ({x.get('modelo') or '?'})" for x in m[:6])
+        return None, {"erro": f"achei {len(m)} {descricao}s com '{termo}': {nomes}. "
+                              "Diga cliente E carro pra eu não mexer na errada."}
+    return m[0], None
 
 
 def marcar_entregue(cliente: str | None = None, veiculo: str | None = None) -> dict:
-    rows = [r for r in db.select_all("vendas", {"select": "id,cliente_nome,modelo,versao,status_entrega"})
+    rows = [r for r in db.select_all("vendas", {"select": "id,cliente_nome,modelo,versao,status_entrega,"
+                                                "valor_total,valor_venda,valor_entrada"})
             if r.get("status_entrega") != "entregue"]
-    r = _match(rows, cliente or veiculo, ["cliente_nome", "modelo", "versao"])
-    if not r:
-        return {"erro": f"não achei venda pendente com '{cliente or veiculo}'"}
+    r, err = _venda_unica(rows, cliente, veiculo, "venda pendente")
+    if err:
+        return err
     from . import datas
-    db.update("vendas", {"status_entrega": "entregue", "status_pagamento": "pago",
-                         "data_entrega_real": datas.hoje_iso()}, {"id": f"eq.{r['id']}"})
-    return {"ok": True, "entregue": f"{r['cliente_nome']} — {r.get('modelo','')} {r.get('versao','') or ''}".strip()}
+    dados = {"status_entrega": "entregue", "data_entrega_real": datas.hoje_iso()}
+    saldo = (r.get("valor_total") or r.get("valor_venda") or 0) - (r.get("valor_entrada") or 0)
+    if saldo <= 0:  # só quita automático se não há saldo a receber (I3)
+        dados["status_pagamento"] = "pago"
+    db.update("vendas", dados, {"id": f"eq.{r['id']}"})
+    msg = f"{r['cliente_nome']} — {r.get('modelo', '')} {r.get('versao', '') or ''}".strip()
+    if saldo > 0:
+        return {"ok": True, "entregue": msg, "atencao": f"ainda há R$ {saldo:.0f} a receber — não marquei como pago"}
+    return {"ok": True, "entregue": msg}
 
 
 def marcar_pago(cliente: str | None = None, veiculo: str | None = None) -> dict:
     rows = [r for r in db.select_all("vendas", {"select": "id,cliente_nome,modelo,versao,status_pagamento"})
             if r.get("status_pagamento") != "pago"]
-    r = _match(rows, cliente or veiculo, ["cliente_nome", "modelo", "versao"])
-    if not r:
-        return {"erro": f"não achei venda a receber com '{cliente or veiculo}'"}
+    r, err = _venda_unica(rows, cliente, veiculo, "venda a receber")
+    if err:
+        return err
     db.update("vendas", {"status_pagamento": "pago"}, {"id": f"eq.{r['id']}"})
     return {"ok": True, "pago": f"{r['cliente_nome']} — {r.get('modelo','')}".strip()}
 
 
 def marcar_anunciado(veiculo: str) -> dict:
-    rows = [r for r in db.select("veiculos", {"select": "id,marca,modelo,versao,status"})
+    rows = [r for r in db.select_all("veiculos", {"select": "id,marca,modelo,versao,status"})
             if r.get("status") == "a_anunciar"]
-    r = _match(rows, veiculo, ["marca", "modelo", "versao"])
-    if not r:
+    m = [r for r in rows if _match_carro(r, veiculo)]
+    if not m:
         return {"erro": f"não achei carro a anunciar com '{veiculo}'"}
-    db.update("veiculos", {"status": "anunciado"}, {"id": f"eq.{r['id']}"})
-    return {"ok": True, "anunciado": f"{r.get('marca','')} {r.get('modelo','')}".strip()}
+    if len(m) > 1:
+        nomes = ", ".join(f"{x.get('marca','')} {x.get('modelo','')}".strip() for x in m[:6])
+        return {"erro": f"achei {len(m)} carros com '{veiculo}': {nomes}. Seja mais específico."}
+    db.update("veiculos", {"status": "anunciado"}, {"id": f"eq.{m[0]['id']}"})
+    return {"ok": True, "anunciado": f"{m[0].get('marca','')} {m[0].get('modelo','')}".strip()}
+
+
+def _match_carro(r, termo):
+    t = (termo or "").strip().lower()
+    alvo = f"{r.get('marca','') or ''} {r.get('modelo','') or ''} {r.get('versao','') or ''}".lower()
+    return bool(t) and t in alvo
 
 
 def atualizar_venda(cliente: str | None = None, veiculo: str | None = None, **campos) -> dict:
-    """Edita uma venda existente. Localiza por cliente ou veículo e altera os campos informados."""
+    """Edita uma venda existente. Localiza por cliente E/OU veículo (exige unicidade)."""
     rows = db.select_all("vendas", {"select": "id,cliente_nome,modelo,versao"})
-    r = _match(rows, cliente or veiculo, ["cliente_nome", "modelo", "versao"])
-    if not r:
-        return {"erro": f"não achei venda com '{cliente or veiculo}'"}
+    r, err = _venda_unica(rows, cliente, veiculo, "venda")
+    if err:
+        return err
     permitidos = {"portal_venda", "valor_venda", "forma_pagamento", "banco", "valor_financiado",
                   "valor_entrada", "troca_valor", "status_pagamento", "status_entrega",
                   "data_venda", "data_entrega_prevista", "cliente_nome", "observacoes",
@@ -376,10 +408,14 @@ def listar_lembretes() -> dict:
 def atualizar_carro(veiculo: str, preco_anuncio: float | None = None, status: str | None = None,
                     cor: str | None = None, km: int | None = None, ano: int | None = None) -> dict:
     """Edita um carro do estoque (preço, status, cor, km, ano). Localiza por marca/modelo/versão."""
-    rows = db.select("veiculos", {"select": "id,marca,modelo,versao"})
-    r = _match(rows, veiculo, ["marca", "modelo", "versao"])
-    if not r:
+    rows = db.select_all("veiculos", {"select": "id,marca,modelo,versao"})
+    m = [r for r in rows if _match_carro(r, veiculo)]
+    if not m:
         return {"erro": f"não achei carro com '{veiculo}'"}
+    if len(m) > 1:
+        nomes = ", ".join(f"{x.get('marca','')} {x.get('modelo','')} {x.get('versao','') or ''}".strip() for x in m[:6])
+        return {"erro": f"achei {len(m)} carros com '{veiculo}': {nomes}. Seja mais específico (com versão/ano)."}
+    r = m[0]
     set_ = {k: v for k, v in {"preco_anuncio": preco_anuncio, "status": status, "cor": cor,
                               "km": km, "ano": ano}.items() if v is not None}
     if not set_:

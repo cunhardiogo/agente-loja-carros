@@ -4,8 +4,12 @@ from datetime import timedelta
 from . import datas, db, ingest
 from .schemas import Extracao
 
-_AFIRMA = {"sim", "s", "isso", "isso mesmo", "confirmo", "confirma", "confirmar", "ok", "okay",
-           "certo", "correto", "pode", "pode registrar", "perfeito", "exato", "positivo", "👍", "✅"}
+# forte: confirma mesmo sem código. fraca: palavra genérica de fim de conversa —
+# só confirma se vier com o código (evita registrar evento sem querer).
+_AFIRMA_FORTE = {"sim", "s", "isso", "isso mesmo", "confirmo", "confirma", "confirmar",
+                 "correto", "exato", "positivo", "👍", "✅"}
+_AFIRMA_FRACA = {"ok", "okay", "certo", "pode", "pode registrar", "perfeito", "blz", "beleza"}
+_AFIRMA = _AFIRMA_FORTE | _AFIRMA_FRACA
 _NEGA = {"não", "nao", "n", "errado", "incorreto", "negativo", "descarta", "descartar",
          "ignora", "ignorar", "esquece", "esquecer", "❌"}
 # gatilhos de correção SEGUROS: prefixos que não disparam em perguntas normais.
@@ -28,8 +32,8 @@ def _resumo(dados: dict) -> str:
     return dados.get("resumo") or dados.get("veiculo_descricao") or dados.get("tipo_evento") or "registro"
 
 
-def _classificar(t: str) -> str | None:
-    if t in _AFIRMA:
+def _classificar(t: str, tem_codigo: bool = False) -> str | None:
+    if t in _AFIRMA_FORTE or (tem_codigo and t in _AFIRMA_FRACA):
         return "sim"
     if t in _NEGA:
         return "nao"
@@ -111,12 +115,14 @@ def tentar_resolver(texto: str) -> str | None:
 
     # código explícito na mensagem? (ex: "a3f2 sim")
     alvo = None
+    tem_codigo = False
     m = _RE_CODIGO.search(t)
     if m and m.group(1) in por_codigo:
         alvo = por_codigo[m.group(1)]
+        tem_codigo = True
         t = (t[:m.start()] + " " + t[m.end():]).strip()
 
-    acao = _classificar(t)
+    acao = _classificar(t, tem_codigo)
     if acao is None:
         return None  # não é confirmação → deixa o agente responder
 

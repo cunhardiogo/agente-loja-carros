@@ -93,7 +93,7 @@ def ler_imagem(image_b64: str, mimetype: str | None) -> str:
         raise RuntimeError("OPENAI_API_KEY não configurada")
     data_uri = f"data:{mimetype or 'image/jpeg'};base64,{image_b64}"
     resp = _client.chat.completions.create(
-        model=settings.openai_model_consulta,
+        model=settings.openai_model_extracao,  # mini: visão é frequente (grupo de fotos) e o caro não compensa
         messages=[
             {"role": "system", "content": VISAO_SYSTEM},
             {"role": "user", "content": [

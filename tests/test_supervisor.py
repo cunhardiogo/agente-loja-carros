@@ -35,7 +35,17 @@ def test_persistir_conta_so_novos(monkeypatch):
     # insert_lock devolve None p/ duplicado (já aberto) e dict p/ novo
     seq = iter([{"id": "a"}, None, {"id": "b"}])
     monkeypatch.setattr(db, "insert_lock", lambda t, d: next(seq))
-    assert supervisor.persistir([{}, {}, {}]) == 2
+    monkeypatch.setattr(supervisor, "_silenciados", lambda: set())
+    alertas = [{"tipo": "R1", "chave": str(i)} for i in range(3)]
+    assert supervisor.persistir(alertas) == 2
+
+
+def test_persistir_respeita_snooze(monkeypatch):
+    monkeypatch.setattr(supervisor, "_silenciados", lambda: {("R2", "veiculo:x")})
+    chamou = []
+    monkeypatch.setattr(db, "insert_lock", lambda t, d: chamou.append(d) or {"id": "z"})
+    n = supervisor.persistir([{"tipo": "R2", "chave": "veiculo:x"}, {"tipo": "R3", "chave": "venda:y"}])
+    assert n == 1 and len(chamou) == 1 and chamou[0]["tipo"] == "R3"
 
 
 def test_radar_texto_vazio(monkeypatch):

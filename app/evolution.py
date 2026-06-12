@@ -1,7 +1,10 @@
+import logging
+
 import httpx
 
 from .config import settings
 
+log = logging.getLogger("agente")
 _base = settings.evolution_url.rstrip("/")
 
 
@@ -70,9 +73,13 @@ def numeros_alerta() -> list[str]:
     return [n.strip() for n in (settings.numeros_relatorio or "").split(",") if n.strip()]
 
 
-def enviar_relatorio(texto: str) -> None:
+def enviar_relatorio(texto: str) -> int:
+    """Envia a todos os destinatários. Loga e conta falhas (antes engolia em silêncio)."""
+    falhas = 0
     for numero in _destinatarios():
         try:
             enviar_texto(numero, texto)
         except Exception:
-            pass
+            falhas += 1
+            log.exception("falha enviando relatório para %s", numero)
+    return falhas
