@@ -26,10 +26,12 @@ def _cacheado(chave: str, fn):
         _CACHE[chave] = (agora, val)
     return val
 
-# ações do Meta que contam como "lead/conversa" pro nosso negócio
-_LEADS = {"lead", "onsite_conversion.lead_grouped", "onsite_web_lead"}
-_CONVERSAS = {"onsite_conversion.messaging_conversation_started_7d",
-              "onsite_conversion.total_messaging_connection"}
+# O Meta reporta a MESMA conversão sob vários action_type (lead == lead_grouped ==
+# onsite_web_lead == ...). Somar tudo triplica o número. Então usamos UMA métrica
+# canônica por prioridade (a 1ª presente vence) — nunca a soma.
+_LEADS = ["lead", "onsite_conversion.lead_grouped", "onsite_web_lead"]
+_CONVERSAS = ["onsite_conversion.messaging_conversation_started_7d",
+              "onsite_conversion.total_messaging_connection"]
 
 
 def configurado() -> bool:
@@ -43,8 +45,14 @@ def _get(path: str, params: dict) -> dict:
     return r.json()
 
 
-def _soma_acoes(actions: list, tipos: set) -> int:
-    return sum(int(float(a["value"])) for a in (actions or []) if a.get("action_type") in tipos)
+def _valor_acao(actions: list, prioridade: list) -> int:
+    """Valor de UMA ação canônica: a primeira da lista de prioridade que existir.
+    Evita somar rótulos duplicados que o Meta usa pra mesma conversão."""
+    idx = {a.get("action_type"): a for a in (actions or [])}
+    for t in prioridade:
+        if t in idx:
+            return int(float(idx[t]["value"]))
+    return 0
 
 
 def _preset(periodo: str) -> str:
@@ -71,8 +79,8 @@ def _resumo(periodo: str = "semana") -> dict:
 
     linha = (data.get("data") or [{}])[0]
     gasto = float(linha.get("spend") or 0)
-    leads = _soma_acoes(linha.get("actions"), _LEADS)
-    conversas = _soma_acoes(linha.get("actions"), _CONVERSAS)
+    leads = _valor_acao(linha.get("actions"), _LEADS)
+    conversas = _valor_acao(linha.get("actions"), _CONVERSAS)
     return {
         "periodo": periodo,
         "gasto": round(gasto, 2),
@@ -101,7 +109,7 @@ def _campanhas(periodo: str = "semana") -> dict:
     itens = []
     for c in data.get("data", []):
         gasto = float(c.get("spend") or 0)
-        leads = _soma_acoes(c.get("actions"), _LEADS)
+        leads = _valor_acao(c.get("actions"), _LEADS)
         itens.append({"campanha": c.get("campaign_name"), "gasto": round(gasto, 2),
                       "cliques": int(c.get("clicks") or 0), "leads": leads,
                       "custo_por_lead": round(gasto / leads, 2) if leads else None})

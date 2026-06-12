@@ -3,11 +3,20 @@ from app.schemas import Extracao, TipoEvento
 
 
 # ---- meta_ads (puro) ----
-def test_soma_acoes_filtra_tipos():
-    actions = [{"action_type": "lead", "value": "13"},
-               {"action_type": "link_click", "value": "2579"},
-               {"action_type": "onsite_conversion.lead_grouped", "value": "5"}]
-    assert meta_ads._soma_acoes(actions, meta_ads._LEADS) == 18
+def test_valor_acao_pega_canonico_sem_somar():
+    # mesma conversão sob 3 rótulos (todos 22) → tem de retornar 22, não 66
+    actions = [{"action_type": "lead", "value": "22"},
+               {"action_type": "onsite_conversion.lead_grouped", "value": "22"},
+               {"action_type": "onsite_web_lead", "value": "22"},
+               {"action_type": "link_click", "value": "2579"}]
+    assert meta_ads._valor_acao(actions, meta_ads._LEADS) == 22
+
+
+def test_valor_acao_respeita_prioridade():
+    # sem 'lead', cai pro próximo da lista
+    actions = [{"action_type": "onsite_web_lead", "value": "9"}]
+    assert meta_ads._valor_acao(actions, meta_ads._LEADS) == 9
+    assert meta_ads._valor_acao([], meta_ads._LEADS) == 0
 
 
 def test_preset_mapeia_periodos():
