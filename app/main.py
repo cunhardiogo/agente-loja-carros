@@ -429,6 +429,7 @@ def _metrics_calc() -> dict:
         "insight": _ultimo_insight(),
         "pendentes_itens": pendentes,
         "notas": supervisor.listar_notas()["notas"],
+        "ligar_hoje": consulta.lista_ligar_hoje()["itens"],
         "funil": _funil(),
         # Fase 4 — metas, giro, recalls, Meta Ads
         "metas": consulta.progresso_metas(),
@@ -556,6 +557,15 @@ def _agenda_manha_texto() -> str:
         f"⚠️ Atrasadas p/ entregar: {atr_txt}",
         f"🅿️ Reservados aguardando: {res_txt}",
     ]
+
+    # lista "ligar hoje" (assistido): quem precisa de contato, com telefone
+    ligar = consulta.lista_ligar_hoje()["itens"]
+    if ligar:
+        linhas.append(f"\n📞 *Ligar hoje ({len(ligar)}):*")
+        for it in ligar[:8]:
+            tel = f" · {it['telefone']}" if it.get("telefone") else ""
+            linhas.append(f"• {it.get('cliente') or '—'} — {it['motivo']}{tel}")
+
     if hoje_ent or atras:
         linhas.append("\n👉 Já entregou alguma? Responde \"entreguei o [carro]\" que eu atualizo.")
     return "\n".join(linhas)

@@ -630,7 +630,90 @@ def meta_ads_roas(periodo: str = "mes") -> dict:
     return meta_ads.roas(periodo)
 
 
+def _dias_desde(iso: str | None):
+    if not iso:
+        return None
+    try:
+        d = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    ag = datas.agora()
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=ag.tzinfo)
+    return (ag - d).days
+
+
+def lista_ligar_hoje() -> dict:
+    """Quem precisa de contato HOJE (assistido — só informa, não liga sozinho):
+    faltas de ontem, reservas paradas, entregas atrasadas e a-receber envelhecendo.
+    Cada item traz o telefone pra facilitar o contato."""
+    hoje = datas.hoje()
+    ontem = (hoje - timedelta(days=1)).isoformat()
+    itens = []
+
+    ags = db.select_all("agendamentos", {"select": "cliente_nome,telefone,data_agendada,compareceu,resultado",
+                                         "origem": "eq.planilha"})
+    for a in ags:
+        dia = (a.get("data_agendada") or "")[:10]
+        res = (a.get("resultado") or "").strip().lower()
+        if a.get("compareceu") is False and dia == ontem:
+            itens.append({"prioridade": 1, "cliente": a.get("cliente_nome"), "telefone": a.get("telefone"),
+                          "motivo": "faltou ontem", "acao": "remarcar visita"})
+        elif res.startswith("reservad"):
+            d = _dias_desde(a.get("data_agendada"))
+            if d is not None and d >= 5:
+                itens.append({"prioridade": 2, "cliente": a.get("cliente_nome"), "telefone": a.get("telefone"),
+                              "motivo": f"reservou há {d}d e não fechou", "acao": "cobrar decisão"})
+
+    vendas = db.select_all("vendas", {"select": "cliente_nome,cliente_telefone,modelo,versao,created_at,"
+                                      "data_entrega_prevista,valor_total,valor_venda,valor_entrada,"
+                                      "status_pagamento,status_entrega"})
+    for v in vendas:
+        carro = " ".join(x for x in (v.get("modelo"), v.get("versao")) if x)
+        if v.get("status_entrega") == "pendente" and v.get("data_entrega_prevista") and \
+                v["data_entrega_prevista"][:10] < hoje.isoformat():
+            itens.append({"prioridade": 1, "cliente": v.get("cliente_nome"), "telefone": v.get("cliente_telefone"),
+                          "motivo": f"entrega do {carro} atrasada", "acao": "remarcar entrega"})
+        elif v.get("status_pagamento") != "pago" and v.get("status_entrega") != "entregue":
+            saldo = (v.get("valor_total") or v.get("valor_venda") or 0) - (v.get("valor_entrada") or 0)
+            d = _dias_desde(v.get("created_at"))
+            if saldo > 0 and d is not None and d >= 7:
+                itens.append({"prioridade": 3, "cliente": v.get("cliente_nome"), "telefone": v.get("cliente_telefone"),
+                              "motivo": f"falta R$ {saldo:.0f} do {carro} ({d}d)", "acao": "cobrar pagamento"})
+
+    itens.sort(key=lambda x: x["prioridade"])
+    return {"quantidade": len(itens), "itens": itens}
+
+
+def mensagem_cobranca(cliente: str | None = None, veiculo: str | None = None) -> dict:
+    """Monta uma mensagem pronta de cobrança pro cliente (assistido: você revisa e encaminha)."""
+    rows = []
+    for v in db.select_all("vendas", {"select": "cliente_nome,modelo,versao,valor_total,valor_venda,"
+                                      "valor_entrada,status_pagamento,status_entrega"}):
+        if v.get("status_pagamento") == "pago" or v.get("status_entrega") == "entregue":
+            continue
+        saldo = (v.get("valor_total") or v.get("valor_venda") or 0) - (v.get("valor_entrada") or 0)
+        if saldo > 0:
+            v["_saldo"] = saldo
+            rows.append(v)
+    r, err = _venda_unica(rows, cliente, veiculo, "venda a receber")
+    if err:
+        return err
+    nome = (r.get("cliente_nome") or "").split()[0] or "tudo bem"
+    carro = " ".join(x for x in (r.get("modelo"), r.get("versao")) if x) or "seu carro"
+    saldo = r["_saldo"]
+    saldo_fmt = f"{saldo:,.0f}".replace(",", ".")  # formata só o número (não o texto)
+    msg = (f"Oi {nome}, tudo bem? 😊\n\n"
+           f"Passando pra alinhar o restante da compra do {carro}. "
+           f"Ainda ficou um saldo de R$ {saldo_fmt} pra gente concluir tudo certinho.\n\n"
+           f"Pode me dizer como prefere acertar? Qualquer dúvida, é só chamar por aqui!")
+    return {"cliente": r.get("cliente_nome"), "veiculo": carro, "saldo": round(saldo),
+            "mensagem": msg}
+
+
 DISPATCH = {
+    "lista_ligar_hoje": lista_ligar_hoje,
+    "mensagem_cobranca": mensagem_cobranca,
     "giro_estoque": giro_estoque,
     "margem_estoque": margem_estoque,
     "definir_meta": definir_meta,
@@ -834,6 +917,18 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {"periodo": _PERIODO}},
     }},
     {"type": "function", "function": {
+        "name": "lista_ligar_hoje",
+        "description": "Lista de clientes pra contatar hoje (faltas de ontem, reservas paradas, entregas atrasadas, a receber), com telefone e o motivo. Você liga — o agente só organiza.",
+        "parameters": {"type": "object", "properties": {}},
+    }},
+    {"type": "function", "function": {
+        "name": "mensagem_cobranca",
+        "description": "Monta uma mensagem pronta de cobrança pra um cliente que tem saldo a receber, pra você revisar e encaminhar.",
+        "parameters": {"type": "object", "properties": {
+            "cliente": {"type": "string", "description": "Nome do cliente"},
+            "veiculo": {"type": "string", "description": "Carro (opcional, p/ desambiguar)"}}},
+    }},
+    {"type": "function", "function": {
         "name": "giro_estoque",
         "description": "Tempo de giro do estoque: quantos dias cada carro está parado (a anunciar/anunciado/reservado), média e os mais parados.",
         "parameters": {"type": "object", "properties": {}},
@@ -890,6 +985,7 @@ AÇÕES quando o dono pedir: marcar_entregue, marcar_pago, marcar_anunciado, e E
 e atualizar_carro (preço/status/cor/km do estoque). Confirme em 1 linha o que mudou (ou que não encontrou). Nunca invente se a ferramenta der erro. \
 LEMBRETES: criar_lembrete quando o dono pedir p/ ser lembrado (calcule 'quando' em ISO a partir da DATA DE HOJE); listar_lembretes p/ ver os pendentes.
 SUPERVISOR: você é proativo. radar mostra os alertas abertos (carro encalhado, a receber parado, entrega atrasada, comparecimento baixo, sistema fora) — use quando perguntarem 'o que preciso resolver?'/'como está a operação?', e resolver_alerta p/ baixar um. anotar salva recado livre sem horário; listar_notas/resolver_nota gerenciam. pendências (listar_pendencias) mostra o que aguarda sua confirmação.
+SECRETÁRIA (assistido — você organiza, o DONO contata): lista_ligar_hoje dá quem ligar hoje (faltas de ontem, reservas paradas, entrega atrasada, a receber) com telefone — use em 'quem preciso contatar?'/'tem alguém pra ligar?'. mensagem_cobranca monta um texto pronto e educado de cobrança pra um cliente com saldo (ex 'manda uma cobrança pro João'); ENTREGUE o texto pro dono copiar/encaminhar e deixe claro que ele revisa e envia — você NUNCA manda direto pro cliente.
 OBS: agendamento, comparecimento, vendido e reservado vêm da PLANILHA — não dá pra editar por aqui; nesse caso oriente a corrigir na planilha.
 
 ESTILO: curto e direto, em português, valores como R$ 95.000, listas em linhas curtas com emojis discretos. \
