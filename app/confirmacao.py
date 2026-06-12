@@ -62,7 +62,10 @@ def _aplicar_sim(ev: dict) -> str:
 
 def _aplicar_corrige(ev: dict, texto: str) -> str:
     novo = ingest.reextrair(ev.get("mensagem_original") or "", texto)
-    tabela, rid = ingest.aplicar(novo)
+    # o dono está corrigindo de propósito → força a venda (não trata como duplicada)
+    tabela, rid = ingest.aplicar(novo, forcar_venda=True)
+    if tabela == "duplicada":  # defensivo: nunca persistir 'duplicada' como sucesso
+        tabela, rid = None, None
     db.update("eventos_brutos",
               {"status": "confirmado" if rid else "pendente_confirmacao",
                "dados_extraidos": novo.model_dump(mode="json"),

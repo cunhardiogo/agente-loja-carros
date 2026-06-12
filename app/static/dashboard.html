@@ -226,6 +226,8 @@
 const brl = v => (v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0});
 const dm = s => s ? s.slice(8,10)+'/'+s.slice(5,7) : '';
 const hm = s => s ? s.slice(0,5) : '';
+// escapa qualquer dado vindo do banco/WhatsApp antes de ir pro innerHTML (anti-XSS)
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const SEV = {critico:'border-rose-600 bg-rose-900/30', aviso:'border-amber-600/60 bg-amber-900/20', info:'border-sky-700/50 bg-sky-900/15'};
 const SEV_IC = {critico:'🔴', aviso:'🟡', info:'🔵'};
 let chart, tok;
@@ -235,7 +237,16 @@ function token(){
   tok = new URLSearchParams(location.search).get('token') || localStorage.getItem('sb_token');
   if(!tok){ tok = prompt('Token de acesso do painel:'); }
   if(tok) localStorage.setItem('sb_token', tok);
+  // tira o token da URL (não fica em histórico/log)
+  if(location.search.includes('token=')){ history.replaceState(null,'',location.pathname); }
   return tok;
+}
+
+// token vai no header Authorization (não na query string)
+function api(path, opts){
+  opts = opts||{};
+  opts.headers = Object.assign({}, opts.headers, {'Authorization':'Bearer '+token()});
+  return fetch(path, opts);
 }
 
 function aba(nome){
@@ -246,16 +257,24 @@ function aba(nome){
 async function carregar(){
   const erro = document.getElementById('erro'); erro.classList.add('hidden');
   try{
-    const r = await fetch('/api/metrics?token='+encodeURIComponent(token()));
+    const r = await api('/api/metrics');
     if(r.status===401){ localStorage.removeItem('sb_token'); tok=null; throw new Error('Token inválido. Recarregue a página.'); }
     render(await r.json());
   }catch(e){ erro.textContent = e.message; erro.classList.remove('hidden'); }
 }
 
-async function acao(url){
-  await fetch(url+'?token='+encodeURIComponent(token()), {method:'POST'});
+async function acao(path, confirmar){
+  if(confirmar && !confirm(confirmar)) return;
+  await api(path, {method:'POST'});
   carregar();
 }
+
+// delegação de clique: botões usam data-acao em vez de onclick interpolado
+document.addEventListener('click', e=>{
+  const b = e.target.closest('[data-acao]');
+  if(!b) return;
+  acao(b.dataset.acao, b.dataset.confirm);
+});
 
 function render(d){
   const v = d.vendas_mes;
@@ -276,23 +295,23 @@ function render(d){
   const lr = document.getElementById('lista_radar');
   lr.innerHTML = nAl ? d.radar.map(a=>`<li class="rounded-lg border p-3 ${SEV[a.severidade]||'border-slate-700'}">
       <div class="flex justify-between gap-2">
-        <span>${SEV_IC[a.severidade]||'•'} <b>${a.titulo}</b>${a.detalhe?`<br><span class="text-slate-400 text-xs">${a.detalhe}</span>`:''}</span>
-        <button onclick="acao('/api/alertas/resolver?titulo='+encodeURIComponent(${JSON.stringify(a.titulo)}))" class="shrink-0 text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 h-fit">✓ resolver</button>
+        <span>${SEV_IC[a.severidade]||'•'} <b>${esc(a.titulo)}</b>${a.detalhe?`<br><span class="text-slate-400 text-xs">${esc(a.detalhe)}</span>`:''}</span>
+        <button data-acao="/api/alertas/resolver?titulo=${encodeURIComponent(a.titulo)}" aria-label="Resolver alerta" class="shrink-0 text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 h-fit">✓ resolver</button>
       </div></li>`).join('') : '<li class="text-slate-500">✅ Nada aberto agora.</li>';
 
   document.getElementById('pend_qtd').textContent = (d.pendentes_itens||[]).length;
   const lp = document.getElementById('lista_pendentes');
   lp.innerHTML = (d.pendentes_itens||[]).length ? d.pendentes_itens.map(p=>`<li class="rounded-lg border border-slate-700 bg-slate-900/40 p-3">
       <div class="flex justify-between gap-2 items-start">
-        <span><span class="text-slate-500">[#${p.codigo}]</span> <b>${p.tipo}</b> — ${p.resumo}<br><span class="text-slate-500 text-xs">${p.mensagem}</span></span>
+        <span><span class="text-slate-500">[#${esc(p.codigo)}]</span> <b>${esc(p.tipo)}</b> — ${esc(p.resumo)}<br><span class="text-slate-500 text-xs">${esc(p.mensagem)}</span></span>
         <span class="flex gap-1 shrink-0">
-          <button onclick="acao('/api/eventos/${p.id}/confirmar')" class="text-xs px-2 py-1 rounded bg-emerald-700 hover:bg-emerald-600">✅</button>
-          <button onclick="acao('/api/eventos/${p.id}/descartar')" class="text-xs px-2 py-1 rounded bg-rose-800 hover:bg-rose-700">❌</button>
+          <button data-acao="/api/eventos/${encodeURIComponent(p.id)}/confirmar" aria-label="Confirmar" class="text-xs px-2 py-1 rounded bg-emerald-700 hover:bg-emerald-600">✅</button>
+          <button data-acao="/api/eventos/${encodeURIComponent(p.id)}/descartar" data-confirm="Descartar esta pendência?" aria-label="Descartar" class="text-xs px-2 py-1 rounded bg-rose-800 hover:bg-rose-700">❌</button>
         </span>
       </div></li>`).join('') : '<li class="text-slate-500">Nada aguardando.</li>';
 
   document.getElementById('notas_qtd').textContent = (d.notas||[]).length;
-  lista('lista_notas', d.notas, x=>x.texto);
+  lista('lista_notas', d.notas, x=>esc(x.texto));
 
   // ---- FUNIL ----
   const f = d.funil||{}; const base = Math.max(f.agendados||0,1);
@@ -317,7 +336,7 @@ function render(d){
   const cv = d.conversao || {};
   document.getElementById('conv_taxa').textContent = (cv.taxa_conversao ?? 0) + '%';
   document.getElementById('conv_det').textContent = (cv.vendidos ?? 0) + '/' + (cv.agendamentos ?? 0) + ' agend.→venda';
-  lista('lista_canais', (d.canais&&d.canais.canais)||[], x=>`${x.canal} <span class="float-right">${x.quantidade} · ${brl(x.valor_total)}</span>`);
+  lista('lista_canais', (d.canais&&d.canais.canais)||[], x=>`${esc(x.canal)} <span class="float-right">${x.quantidade} · ${brl(x.valor_total)}</span>`);
 
   // ---- FINANCEIRO ----
   document.getElementById('fin_total').textContent = brl(v.valor_total);
@@ -327,18 +346,18 @@ function render(d){
   document.getElementById('fin_over').textContent = brl(v.over_total||0);
   lista('lista_receber', d.a_receber.itens, x=>{
     const comp = [x.ja_pago?('pago '+brl(x.ja_pago)):'', x.financiado?('financ '+brl(x.financiado)):'', x.troca?('troca '+brl(x.troca)):''].filter(Boolean).join(' · ');
-    return `<div class="flex justify-between"><span>${x.cliente_nome||'—'} <span class="text-slate-500">${x.veiculo||''}</span></span><span class="text-amber-400">${brl(x.a_receber)}</span></div>${comp?`<div class="text-xs text-slate-500">vendido ${brl(x.valor_vendido)} · ${comp}</div>`:''}`;
+    return `<div class="flex justify-between"><span>${esc(x.cliente_nome)||'—'} <span class="text-slate-500">${esc(x.veiculo)}</span></span><span class="text-amber-400">${brl(x.a_receber)}</span></div>${comp?`<div class="text-xs text-slate-500">vendido ${brl(x.valor_vendido)} · ${comp}</div>`:''}`;
   });
   const mg = d.margem || {};
   document.getElementById('marg_media').textContent = brl(mg.media_abaixo_da_fipe||0);
   document.getElementById('marg_qtd').textContent = mg.quantidade||0;
-  lista('lista_margem', (mg.itens||[]), x=>`${x.modelo||'—'} <span class="float-right text-slate-400">FIPE ${brl(x.fipe)} → ${brl(x.avaliado)}</span>`);
+  lista('lista_margem', (mg.itens||[]), x=>`${esc(x.modelo)||'—'} <span class="float-right text-slate-400">FIPE ${brl(x.fipe)} → ${brl(x.avaliado)}</span>`);
 
   // ---- ESTOQUE ----
   document.getElementById('estoque_qtd').textContent = d.estoque.quantidade;
-  lista('lista_estoque', d.estoque.carros, x=>`${[x.marca,x.modelo,x.ano].filter(Boolean).join(' ')} <span class="text-emerald-400 float-right">${brl(x.preco_anuncio)}</span>`);
+  lista('lista_estoque', d.estoque.carros, x=>`${esc([x.marca,x.modelo,x.ano].filter(Boolean).join(' '))} <span class="text-emerald-400 float-right">${brl(x.preco_anuncio)}</span>`);
   document.getElementById('entregas_qtd').textContent = d.entregas.quantidade;
-  lista('lista_entregas', d.entregas.entregas, x=>`${x.veiculo||'—'} <span class="text-slate-400 float-right">${dm(x.data_entrega)} ${hm(x.horario)}</span><br><span class="text-xs text-slate-500">${x.vendedor||''} ${x.observacao?('· '+x.observacao):''}</span>`);
+  lista('lista_entregas', d.entregas.entregas, x=>`${esc(x.veiculo)||'—'} <span class="text-slate-400 float-right">${dm(x.data_entrega)} ${hm(x.horario)}</span><br><span class="text-xs text-slate-500">${esc(x.vendedor)} ${x.observacao?('· '+esc(x.observacao)):''}</span>`);
 
   const vl = (d.vendas_lista && d.vendas_lista.vendas) || [];
   document.getElementById('vend_qtd').textContent = d.vendas_lista ? d.vendas_lista.quantidade : 0;
@@ -349,7 +368,7 @@ function render(d){
       : `<span class="text-amber-400">⏳ ${x.data_entrega_prevista?dm(x.data_entrega_prevista):'Pendente'}</span>`;
     const pago = x.status_pagamento === 'pago' ? '<span class="text-emerald-400">pago</span>' : '<span class="text-slate-400">pendente</span>';
     return `<tr class="border-b border-slate-800 ${entregue?'':'bg-amber-900/10'}">
-      <td class="py-2 pr-3">${x.cliente_nome||'—'}</td><td class="py-2 pr-3 text-slate-300">${[x.modelo,x.versao].filter(Boolean).join(' ')||'—'}</td>
+      <td class="py-2 pr-3">${esc(x.cliente_nome)||'—'}</td><td class="py-2 pr-3 text-slate-300">${esc([x.modelo,x.versao].filter(Boolean).join(' '))||'—'}</td>
       <td class="py-2 pr-3">${brl(x.valor_venda)}</td><td class="py-2 pr-3 text-slate-400">${dm(x.data_venda)}</td>
       <td class="py-2 pr-3">${ent}</td><td class="py-2">${pago}</td></tr>`;
   }).join('') : '<tr><td colspan="6" class="py-2 text-slate-500">Nenhuma venda</td></tr>';
@@ -357,22 +376,22 @@ function render(d){
   const av = (d.avaliacoes && d.avaliacoes.avaliacoes) || [];
   document.getElementById('aval_qtd').textContent = d.avaliacoes ? d.avaliacoes.quantidade : 0;
   document.getElementById('lista_aval').innerHTML = av.length ? av.map(x=>`<tr class="border-b border-slate-800">
-    <td class="py-2 pr-3">${[x.modelo,x.versao].filter(Boolean).join(' ')||'—'}</td><td class="py-2 pr-3">${x.ano||''}</td>
+    <td class="py-2 pr-3">${esc([x.modelo,x.versao].filter(Boolean).join(' '))||'—'}</td><td class="py-2 pr-3">${esc(x.ano)}</td>
     <td class="py-2 pr-3">${x.fipe?brl(x.fipe):'—'}</td><td class="py-2 pr-3">${x.valor_pretendido?brl(x.valor_pretendido):'—'}</td>
     <td class="py-2 pr-3 text-emerald-400 font-semibold">${x.valor_avaliacao?brl(x.valor_avaliacao):'—'}</td>
-    <td class="py-2 pr-3 text-slate-400">${x.carro_interesse||'—'}</td><td class="py-2 text-slate-400">${x.obs||''}</td></tr>`).join('')
+    <td class="py-2 pr-3 text-slate-400">${esc(x.carro_interesse)||'—'}</td><td class="py-2 text-slate-400">${esc(x.obs)}</td></tr>`).join('')
     : '<tr><td colspan="7" class="py-2 text-slate-500">Nenhuma avaliação</td></tr>';
 
   // ---- RECALLS (Radar) ----
   const rc = (d.recalls && d.recalls.recalls) || [];
   document.getElementById('recalls_qtd').textContent = rc.length;
-  lista('lista_recalls', rc, x=>`${x.cliente_nome||'—'} <span class="text-slate-500">${x.veiculo||''} ${x.placa||''}</span>${x.motivo?`<span class="float-right text-amber-400">${x.motivo}</span>`:''}`);
+  lista('lista_recalls', rc, x=>`${esc(x.cliente_nome)||'—'} <span class="text-slate-500">${esc(x.veiculo)} ${esc(x.placa)}</span>${x.motivo?`<span class="float-right text-amber-400">${esc(x.motivo)}</span>`:''}`);
 
   // ---- METAS (Funil) ----
   const metas = (d.metas && d.metas.metas) || [];
   const barra = (pct,cor)=>{const p=Math.min(pct||0,100);return `<div class="h-2 rounded bg-slate-700/50"><div class="h-2 rounded ${cor}" style="width:${p}%"></div></div>`;};
   document.getElementById('metas').innerHTML = metas.length ? metas.map(m=>{
-    const quem = m.escopo==='loja' ? '🏪 Loja' : '👤 '+m.vendedor;
+    const quem = m.escopo==='loja' ? '🏪 Loja' : '👤 '+esc(m.vendedor);
     const blocos = [];
     if(m.meta_vendas) blocos.push(`<div><div class="flex justify-between text-xs"><span>Vendas: ${m.vendas}/${m.meta_vendas}</span><span>${m.pct_vendas??0}%</span></div>${barra(m.pct_vendas,'bg-indigo-500')}</div>`);
     if(m.meta_faturamento) blocos.push(`<div><div class="flex justify-between text-xs"><span>Faturamento: ${brl(m.faturamento)}/${brl(m.meta_faturamento)}</span><span>${m.pct_faturamento??0}%</span></div>${barra(m.pct_faturamento,'bg-emerald-500')}</div>`);
@@ -387,7 +406,7 @@ function render(d){
   document.getElementById('giro_1').textContent = fx['16-30']||0;
   document.getElementById('giro_2').textContent = fx['31-60']||0;
   document.getElementById('giro_3').textContent = fx['60+']||0;
-  lista('lista_giro', (g.mais_parados||[]).slice(0,8), x=>`${x.carro} <span class="float-right ${x.dias>30?'text-rose-400':'text-slate-400'}">${x.dias}d · ${x.status}</span>`);
+  lista('lista_giro', (g.mais_parados||[]).slice(0,8), x=>`${esc(x.carro)} <span class="float-right ${x.dias>30?'text-rose-400':'text-slate-400'}">${x.dias}d · ${esc(x.status)}</span>`);
 
   // ---- META ADS (Financeiro) — no auto-refresh, não sobrescreve o período escolhido ----
   if(document.getElementById('ma_periodo').value === 'semana') renderMeta(d.meta_ads, d.meta_roas, null);
@@ -419,7 +438,7 @@ function renderMeta(ma, ro, campanhas){
     document.getElementById('ma_roas').textContent = (ro.roas!=null)
       ? `ROAS tráfego: ${ro.roas}x · ${ro.vendas_trafego||0} venda(s) · custo/venda ${ro.custo_por_venda?brl(ro.custo_por_venda):'—'}`
       : 'Marque o canal "Tráfego" nas vendas pra ver ROAS.';
-    if(Array.isArray(campanhas)) lista('ma_campanhas', campanhas, c=>`${c.campanha||'—'} <span class="float-right text-slate-400">${brl(c.gasto)} · ${c.leads||0} lead(s)${c.custo_por_lead?(' · CPL '+brl(c.custo_por_lead)):''}</span>`);
+    if(Array.isArray(campanhas)) lista('ma_campanhas', campanhas, c=>`${esc(c.campanha)||'—'} <span class="float-right text-slate-400">${brl(c.gasto)} · ${c.leads||0} lead(s)${c.custo_por_lead?(' · CPL '+brl(c.custo_por_lead)):''}</span>`);
     else document.getElementById('ma_campanhas').innerHTML = '';
   } else {
     box.classList.add('hidden'); off.classList.remove('hidden');
@@ -433,7 +452,7 @@ async function carregarMeta(){
   document.getElementById('meta_ads_off').classList.add('hidden');
   document.getElementById('meta_ads_load').classList.remove('hidden');
   try{
-    const r = await fetch('/api/meta_ads?periodo='+periodo+'&token='+encodeURIComponent(token()));
+    const r = await api('/api/meta_ads?periodo='+periodo);
     const d = await r.json();
     renderMeta(d.resumo, d.roas, d.campanhas);
   }catch(e){ renderMeta({erro:'Não consegui falar com o Meta agora.'}); }

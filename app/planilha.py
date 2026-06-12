@@ -8,13 +8,18 @@ from datetime import date, datetime, time
 import httpx
 import openpyxl
 
-from . import db
+from . import datas, db
 from .config import settings
 
 log = logging.getLogger("agente")
 
-# abas de mês de 2026 (Abril26, Maio26, ... Dezembro26)
-_ABA_MES = re.compile(r"26\s*$")
+
+def _re_abas() -> re.Pattern:
+    """Abas de mês do ano atual e do próximo (ex: Maio26, Janeiro27).
+    Dinâmico — antes era fixo em '26' e zeraria a base ao virar o ano."""
+    ano = datas.hoje().year
+    sufixos = "|".join(str(a % 100) for a in (ano, ano + 1))
+    return re.compile(rf"({sufixos})\s*$")
 
 def _compareceu(status: str):
     s = _norm(status)
@@ -86,11 +91,15 @@ def sincronizar() -> dict:
 
     registros: list[dict] = []
     vistos: set[str] = set()
-    abas = [n for n in wb.sheetnames if _ABA_MES.search(n)]
+    re_abas = _re_abas()
+    abas = [n for n in wb.sheetnames if re_abas.search(n)]
+    if not abas:
+        log.warning("sync planilha: nenhuma aba de mês casou (%s) — abortando p/ não apagar a base", wb.sheetnames)
+        return {"abas": [], "sincronizados": 0, "removidos": 0, "abortado": "sem_abas"}
 
     # comparecimento já registrado (ex: vindo do grupo) p/ não ser apagado quando a planilha ainda diz "Agendado"
     compareceu_atual = {x["ref_externa"]: x.get("compareceu")
-                        for x in db.select("agendamentos", {"select": "ref_externa,compareceu", "origem": "eq.planilha"})
+                        for x in db.select_all("agendamentos", {"select": "ref_externa,compareceu", "origem": "eq.planilha"})
                         if x.get("ref_externa")}
 
     # cache de vendedores (resolução em memória, sem ir ao banco por linha)
@@ -160,10 +169,15 @@ def sincronizar() -> dict:
                 "observacoes": " · ".join([p for p in (aba, status, veiculo, canal) if p]),
             })
 
+    # salvaguarda: planilha vazia (permissão mudou, export quebrou) NÃO pode zerar a base
+    if not registros:
+        log.warning("sync planilha: 0 registros lidos das abas %s — não espelho exclusão", abas)
+        return {"abas": abas, "sincronizados": 0, "removidos": 0, "abortado": "sem_registros"}
+
     db.upsert("agendamentos", registros, "ref_externa")
 
     # espelha exclusões/edições: remove da base os da planilha que não estão mais nela
-    existentes = db.select("agendamentos", {"select": "ref_externa", "origem": "eq.planilha"})
+    existentes = db.select_all("agendamentos", {"select": "ref_externa", "origem": "eq.planilha"})
     remover = [e["ref_externa"] for e in existentes if e["ref_externa"] and e["ref_externa"] not in vistos]
     for i in range(0, len(remover), 100):
         lote = remover[i:i + 100]

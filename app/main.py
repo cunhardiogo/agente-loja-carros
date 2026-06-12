@@ -4,7 +4,7 @@ import os
 
 from datetime import timedelta
 
-from fastapi import BackgroundTasks, FastAPI, Request
+from fastapi import BackgroundTasks, FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from . import confirmacao, consulta, datas, db, evolution, ingest, media, meta_ads, planilha, supervisor
@@ -19,6 +19,15 @@ app = FastAPI(title="Agente Loja de Carros — Grupo SB")
 def _token_ok(token: str) -> bool:
     """Comparação em tempo constante (evita timing attack) do token de cron/dashboard."""
     return bool(settings.dashboard_token) and hmac.compare_digest(token or "", settings.dashboard_token)
+
+
+def _autorizado(token: str, authorization: str | None) -> bool:
+    """Aceita o token via header Authorization: Bearer (preferido, não vaza em log)
+    ou via query string (fallback legado)."""
+    if authorization and authorization.lower().startswith("bearer "):
+        if _token_ok(authorization[7:].strip()):
+            return True
+    return _token_ok(token)
 
 
 _rate = {"min": 0, "n": 0}
@@ -69,6 +78,10 @@ def _loop_agendador() -> None:
 
 @app.on_event("startup")
 def _start_bg() -> None:
+    if not settings.webhook_token:
+        log.warning("⚠️ WEBHOOK_TOKEN vazio: o endpoint /webhook/evolution aceita qualquer "
+                    "POST. Configure WEBHOOK_TOKEN e mande o header Authorization no webhook "
+                    "do Evolution para fechar essa porta.")
     threading.Thread(target=_loop_agendador, daemon=True).start()
 
 
@@ -391,15 +404,15 @@ def _metrics() -> dict:
 
 
 @app.get("/api/metrics")
-def api_metrics(token: str = ""):
-    if not _token_ok(token):
+def api_metrics(token: str = "", authorization: str = Header(None)):
+    if not _autorizado(token, authorization):
         return JSONResponse({"erro": "não autorizado"}, status_code=401)
     return _metrics()
 
 
 @app.get("/api/meta_ads")
-def api_meta_ads(periodo: str = "semana", token: str = ""):
-    if not _token_ok(token):
+def api_meta_ads(periodo: str = "semana", token: str = "", authorization: str = Header(None)):
+    if not _autorizado(token, authorization):
         return JSONResponse({"erro": "não autorizado"}, status_code=401)
     if not meta_ads.configurado():
         return {"resumo": None, "roas": None}
@@ -408,22 +421,22 @@ def api_meta_ads(periodo: str = "semana", token: str = ""):
 
 
 @app.post("/api/eventos/{evento_id}/confirmar")
-def api_confirmar(evento_id: str, token: str = ""):
-    if not _token_ok(token):
+def api_confirmar(evento_id: str, token: str = "", authorization: str = Header(None)):
+    if not _autorizado(token, authorization):
         return JSONResponse({"erro": "não autorizado"}, status_code=401)
     return confirmacao.confirmar_id(evento_id)
 
 
 @app.post("/api/eventos/{evento_id}/descartar")
-def api_descartar(evento_id: str, token: str = ""):
-    if not _token_ok(token):
+def api_descartar(evento_id: str, token: str = "", authorization: str = Header(None)):
+    if not _autorizado(token, authorization):
         return JSONResponse({"erro": "não autorizado"}, status_code=401)
     return confirmacao.descartar_id(evento_id)
 
 
 @app.post("/api/alertas/resolver")
-def api_resolver_alerta(titulo: str = "", token: str = ""):
-    if not _token_ok(token):
+def api_resolver_alerta(titulo: str = "", token: str = "", authorization: str = Header(None)):
+    if not _autorizado(token, authorization):
         return JSONResponse({"erro": "não autorizado"}, status_code=401)
     return supervisor.resolver_alerta(titulo)
 
