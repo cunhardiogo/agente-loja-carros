@@ -397,6 +397,16 @@ def api_metrics(token: str = ""):
     return _metrics()
 
 
+@app.get("/api/meta_ads")
+def api_meta_ads(periodo: str = "semana", token: str = ""):
+    if not _token_ok(token):
+        return JSONResponse({"erro": "não autorizado"}, status_code=401)
+    if not meta_ads.configurado():
+        return {"resumo": None, "roas": None}
+    return {"resumo": meta_ads.resumo(periodo), "roas": meta_ads.roas(periodo),
+            "campanhas": meta_ads.campanhas(periodo).get("campanhas", [])}
+
+
 @app.post("/api/eventos/{evento_id}/confirmar")
 def api_confirmar(evento_id: str, token: str = ""):
     if not _token_ok(token):

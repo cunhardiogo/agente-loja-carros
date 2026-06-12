@@ -135,7 +135,16 @@
         <p class="text-2xl font-bold text-sky-400" id="fin_over">—</p></div>
     </section>
     <section class="bg-slate-800/60 rounded-xl p-4 border border-slate-700 mb-4">
-      <h2 class="font-semibold mb-3" id="meta_ads_titulo">📲 Meta Ads (7 dias)</h2>
+      <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
+        <h2 class="font-semibold">📲 Meta Ads</h2>
+        <select id="ma_periodo" onchange="carregarMeta()" class="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-sm">
+          <option value="hoje">Hoje</option>
+          <option value="ontem">Ontem</option>
+          <option value="semana" selected>Últimos 7 dias</option>
+          <option value="30d">Últimos 30 dias</option>
+          <option value="mes">Este mês</option>
+        </select>
+      </div>
       <div id="meta_ads_box" class="hidden">
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center mb-3">
           <div><p class="text-xl font-bold text-rose-300" id="ma_gasto">—</p><p class="text-[10px] text-slate-400">Gasto</p></div>
@@ -143,9 +152,11 @@
           <div><p class="text-xl font-bold text-sky-400" id="ma_cpl">—</p><p class="text-[10px] text-slate-400">Custo/lead</p></div>
           <div><p class="text-xl font-bold text-indigo-300" id="ma_conversas">—</p><p class="text-[10px] text-slate-400">Conversas</p></div>
         </div>
-        <p class="text-xs text-slate-400" id="ma_roas">—</p>
+        <p class="text-xs text-slate-400 mb-3" id="ma_roas">—</p>
+        <ul id="ma_campanhas" class="text-xs divide-y divide-slate-700/60"></ul>
       </div>
       <p id="meta_ads_off" class="text-slate-500 text-sm">Meta Ads não conectado.</p>
+      <p id="meta_ads_load" class="text-slate-500 text-sm hidden">Carregando…</p>
     </section>
     <section class="bg-slate-800/60 rounded-xl p-4 border border-slate-700 mb-4">
       <h2 class="font-semibold mb-3">💰 A receber (detalhe)</h2>
@@ -378,22 +389,8 @@ function render(d){
   document.getElementById('giro_3').textContent = fx['60+']||0;
   lista('lista_giro', (g.mais_parados||[]).slice(0,8), x=>`${x.carro} <span class="float-right ${x.dias>30?'text-rose-400':'text-slate-400'}">${x.dias}d · ${x.status}</span>`);
 
-  // ---- META ADS (Financeiro) ----
-  const ma = d.meta_ads, box=document.getElementById('meta_ads_box'), off=document.getElementById('meta_ads_off');
-  if(ma && !ma.erro){
-    box.classList.remove('hidden'); off.classList.add('hidden');
-    document.getElementById('ma_gasto').textContent = brl(ma.gasto);
-    document.getElementById('ma_leads').textContent = ma.leads;
-    document.getElementById('ma_cpl').textContent = ma.custo_por_lead?brl(ma.custo_por_lead):'—';
-    document.getElementById('ma_conversas').textContent = ma.conversas;
-    const ro = d.meta_roas||{};
-    document.getElementById('ma_roas').textContent = (ro.roas!=null)
-      ? `ROAS tráfego (mês): ${ro.roas}x · ${ro.vendas_trafego||0} venda(s) · custo/venda ${ro.custo_por_venda?brl(ro.custo_por_venda):'—'}`
-      : 'Marque o canal "Tráfego" nas vendas pra ver ROAS.';
-  } else {
-    box.classList.add('hidden'); off.classList.remove('hidden');
-    off.textContent = ma && ma.erro ? ma.erro : 'Meta Ads não conectado.';
-  }
+  // ---- META ADS (Financeiro) — no auto-refresh, não sobrescreve o período escolhido ----
+  if(document.getElementById('ma_periodo').value === 'semana') renderMeta(d.meta_ads, d.meta_roas, null);
 
   const ts = new Date().toLocaleString('pt-BR');
   document.getElementById('atualizado').textContent = ts;
@@ -403,6 +400,43 @@ function render(d){
 function lista(id, itens, fmt){
   const el = document.getElementById(id);
   el.innerHTML = (itens && itens.length) ? itens.map(x=>`<li class="py-2">${fmt(x)}</li>`).join('') : '<li class="py-2 text-slate-500">Nada por aqui</li>';
+}
+
+const MA_ROTULO = {hoje:'hoje', ontem:'ontem', semana:'7 dias', '30d':'30 dias', mes:'este mês'};
+
+function renderMeta(ma, ro, campanhas){
+  const box=document.getElementById('meta_ads_box'), off=document.getElementById('meta_ads_off'),
+        load=document.getElementById('meta_ads_load');
+  load.classList.add('hidden');
+  if(ma && !ma.erro){
+    box.classList.remove('hidden'); off.classList.add('hidden');
+    document.getElementById('ma_gasto').textContent = brl(ma.gasto);
+    document.getElementById('ma_leads').textContent = ma.leads;
+    document.getElementById('ma_cpl').textContent = ma.custo_por_lead?brl(ma.custo_por_lead):'—';
+    document.getElementById('ma_conversas').textContent = ma.conversas;
+    ro = ro||{};
+    const per = MA_ROTULO[document.getElementById('ma_periodo').value]||'';
+    document.getElementById('ma_roas').textContent = (ro.roas!=null)
+      ? `ROAS tráfego: ${ro.roas}x · ${ro.vendas_trafego||0} venda(s) · custo/venda ${ro.custo_por_venda?brl(ro.custo_por_venda):'—'}`
+      : 'Marque o canal "Tráfego" nas vendas pra ver ROAS.';
+    if(Array.isArray(campanhas)) lista('ma_campanhas', campanhas, c=>`${c.campanha||'—'} <span class="float-right text-slate-400">${brl(c.gasto)} · ${c.leads||0} lead(s)${c.custo_por_lead?(' · CPL '+brl(c.custo_por_lead)):''}</span>`);
+    else document.getElementById('ma_campanhas').innerHTML = '';
+  } else {
+    box.classList.add('hidden'); off.classList.remove('hidden');
+    off.textContent = ma && ma.erro ? ma.erro : 'Meta Ads não conectado.';
+  }
+}
+
+async function carregarMeta(){
+  const periodo = document.getElementById('ma_periodo').value;
+  document.getElementById('meta_ads_box').classList.add('hidden');
+  document.getElementById('meta_ads_off').classList.add('hidden');
+  document.getElementById('meta_ads_load').classList.remove('hidden');
+  try{
+    const r = await fetch('/api/meta_ads?periodo='+periodo+'&token='+encodeURIComponent(token()));
+    const d = await r.json();
+    renderMeta(d.resumo, d.roas, d.campanhas);
+  }catch(e){ renderMeta({erro:'Não consegui falar com o Meta agora.'}); }
 }
 
 carregar();
