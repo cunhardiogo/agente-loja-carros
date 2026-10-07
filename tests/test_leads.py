@@ -132,4 +132,35 @@ def test_codigo_de_outra_pendencia_nao_e_capturado(monkeypatch):
 def test_nao_envia_se_vendedor_ja_respondeu(monkeypatch):
     lead = _lead(cobranca_status="proposta", ultimo_retorno_em="2026-10-07T13:10:00+00:00")
     enviados, _ = _setup_aprovacao(monkeypatch, lead)
-    assert "já respondeu" in leads.tentar_resolver("ok abcd") and not enviados
+    assert "já teve retorno" in leads.tentar_resolver("ok abcd") and not enviados
+
+
+def test_converter_status_tipo_data():
+    from app import sheets
+    assert sheets._converter("Status", "Vendido")["status"] == "vendido"
+    assert sheets._converter("Status", "Não veio")["status"] == "nao_veio"
+    r = sheets._converter("Status", "Remarcado (15/10/2026)")
+    assert (r["status"], r["nova_data"]) == ("remarcado", "2026-10-15")
+    assert sheets._converter("Tipo", "Negociação telefone") == {"tipo": "negociacao_telefone"}
+    assert sheets._converter("Data", "20/10/2026") == {"data_agendada": "2026-10-20"}
+    assert sheets._converter("Cliente", " ") == {"cliente_nome": None}
+
+
+def test_importar_edicoes_edita_inclui_e_remove(monkeypatch):
+    from app import sheets
+    updates, inserts = [], []
+    monkeypatch.setattr(sheets.db, "update", lambda t, d, p: updates.append((p["id"], d)))
+    monkeypatch.setattr(sheets.db, "insert", lambda t, d: inserts.append(d))
+    monkeypatch.setattr(leads, "_vendedor", lambda n: None)
+    l1 = _lead(id="11111111-aaaa")
+    l1["planilha_snap"] = sheets._snap(sheets._linha({**l1, "data_agendada": "2026-10-07"}))
+    l2 = _lead(id="22222222-bbbb")
+    l2["planilha_snap"] = sheets._snap(sheets._linha({**l2, "data_agendada": "2026-10-07"}))
+    editada = dict(zip(sheets.CABECALHO, sheets._linha({**l1, "data_agendada": "2026-10-07"})))
+    editada["Status"] = "Vendido"
+    nova = {c: "" for c in sheets.CABECALHO} | {"Cliente": "Carla", "Veículo": "HRV", "Data": "10/10/2026"}
+    n = sheets.importar_edicoes([editada, nova], {l1["id"]: l1, l2["id"]: l2})
+    assert n == 3
+    assert ("eq.11111111-aaaa", ) == (updates[0][0],) and updates[0][1]["status"] == "vendido"
+    assert inserts[0]["cliente_nome"] == "Carla" and inserts[0]["data_agendada"] == "2026-10-10"
+    assert updates[-1] == ("eq.22222222-bbbb", {"removido": True})

@@ -401,9 +401,9 @@ def tentar_resolver(texto: str) -> str | None:
 
 def _enviar_cobranca(lead: dict, msg: str) -> str:
     atual = db.select("leads", {"id": f"eq.{lead['id']}", "limit": "1"})[0]
-    if atual.get("ultimo_retorno_em"):
+    if atual.get("ultimo_retorno_em") or atual.get("status") != "aguardando_retorno":
         db.update("leads", {"cobranca_status": "cancelada"}, {"id": f"eq.{lead['id']}"})
-        return f"{lead.get('vendedor_nome')} já respondeu esse lead — não enviei."
+        return f"Esse lead já teve retorno ({STATUS_LABEL.get(atual.get('status'), atual.get('status'))}) — não enviei."
     v = db.select("vendedores", {"select": "telefone", "id": f"eq.{lead.get('vendedor_id')}", "limit": "1"}) \
         if lead.get("vendedor_id") else []
     tel = v[0].get("telefone") if v else None

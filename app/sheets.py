@@ -20,7 +20,7 @@ _SCOPE = "https://www.googleapis.com/auth/spreadsheets"
 
 CABECALHO = ["Recebido em", "SDR", "Tipo", "Cliente", "Telefone", "Data", "Horário", "Veículo", "Vendedor",
              "Canal", "Troca", "Oferta / entrada", "Observação", "Status", "Último retorno", "Retorno (texto)",
-             "Cobrança", "Código"]
+             "Cobrança", "Código", "ID"]
 
 
 def configurado() -> bool:
@@ -61,22 +61,114 @@ def _fmt_d(iso: str | None) -> str:
     return f"{iso[8:10]}/{iso[5:7]}/{iso[:4]}" if iso else ""
 
 
-def linhas_leads(rows: list[dict]) -> list[list[str]]:
+# colunas que a equipe pode editar na planilha → campo do lead
+EDITAVEIS = {"SDR": "sdr", "Tipo": "tipo", "Cliente": "cliente_nome", "Telefone": "telefone",
+             "Data": "data_agendada", "Horário": "horario", "Veículo": "veiculo", "Vendedor": "vendedor_nome",
+             "Canal": "canal", "Troca": "troca", "Oferta / entrada": "oferta_entrada",
+             "Observação": "observacao", "Status": "status"}
+
+
+def _linha(l: dict) -> list[str]:
     from .leads import STATUS_LABEL, TIPO_LABEL, codigo
-    out = [CABECALHO]
-    for l in rows:
-        status = STATUS_LABEL.get(l["status"], l["status"])
-        if l.get("nova_data"):
-            status += f" ({_fmt_d(l['nova_data'])})"
-        out.append([
-            _fmt_dt(l["recebido_em"]), l.get("sdr") or "", TIPO_LABEL.get(l["tipo"], l["tipo"]),
-            l.get("cliente_nome") or "", l.get("telefone") or "", _fmt_d(l.get("data_agendada")),
-            l.get("horario") or "", l.get("veiculo") or "", l.get("vendedor_nome") or "", l.get("canal") or "",
-            l.get("troca") or "", l.get("oferta_entrada") or "", l.get("observacao") or "", status,
-            _fmt_dt(l.get("ultimo_retorno_em")), l.get("ultimo_retorno_texto") or "",
-            l.get("cobranca_status") or "", codigo(l),
-        ])
-    return out
+    status = STATUS_LABEL.get(l["status"], l["status"])
+    if l.get("nova_data"):
+        status += f" ({_fmt_d(l['nova_data'])})"
+    return [
+        _fmt_dt(l["recebido_em"]), l.get("sdr") or "", TIPO_LABEL.get(l["tipo"], l["tipo"]),
+        l.get("cliente_nome") or "", l.get("telefone") or "", _fmt_d(l.get("data_agendada")),
+        l.get("horario") or "", l.get("veiculo") or "", l.get("vendedor_nome") or "", l.get("canal") or "",
+        l.get("troca") or "", l.get("oferta_entrada") or "", l.get("observacao") or "", status,
+        _fmt_dt(l.get("ultimo_retorno_em")), l.get("ultimo_retorno_texto") or "",
+        l.get("cobranca_status") or "", codigo(l), l["id"],
+    ]
+
+
+def _snap(linha: list[str]) -> dict:
+    return {col: linha[CABECALHO.index(col)] for col in EDITAVEIS}
+
+
+def linhas_leads(rows: list[dict]) -> list[list[str]]:
+    return [CABECALHO] + [_linha(l) for l in rows]
+
+
+def _converter(col: str, valor: str) -> dict:
+    """Valor digitado na planilha → campos do lead."""
+    from .leads import STATUS_LABEL, TIPO_LABEL, _ascii, _data, _vendedor, classificar_resposta
+    v = valor.strip()
+    campo = EDITAVEIS[col]
+    if col == "Tipo":
+        rev = {_ascii(lbl): k for k, lbl in TIPO_LABEL.items()}
+        a = _ascii(v)
+        tipo = rev.get(a) or ("turno" if "turno" in a else "negociacao_telefone" if "telefone" in a or "negoc" in a
+                              else "visita")
+        return {"tipo": tipo}
+    if col == "Data":
+        d = _data(v, datas.hoje())
+        return {"data_agendada": d.isoformat() if d else None}
+    if col == "Vendedor":
+        vend = _vendedor(v)
+        return {"vendedor_nome": v or None, "vendedor_id": vend["id"] if vend else None}
+    if col == "Status":
+        if not v:
+            return {"status": "aguardando_retorno", "nova_data": None}
+        rev = {_ascii(lbl): k for k, lbl in STATUS_LABEL.items()}
+        base = _ascii(v.split("(")[0]).strip()
+        status, nova = (rev[base], None) if base in rev else classificar_resposta(v)
+        if status == "remarcado" or "(" in v:
+            d = _data(v, datas.hoje())
+            nova = d.isoformat() if d else nova
+        return {"status": status, "nova_data": nova if status == "remarcado" else None,
+                "status_em": datas.agora().isoformat()}
+    return {campo: v or None}
+
+
+def _ler(c: httpx.Client) -> list[dict]:
+    r = c.get(f"/{settings.controle_sheet_id}/values/{ABA_AGENDAMENTOS}!A:Z")
+    r.raise_for_status()
+    vals = r.json().get("values", [])
+    if not vals:
+        return []
+    cab = vals[0]
+    return [{cab[i]: (linha[i] if i < len(linha) else "") for i in range(len(cab))} for linha in vals[1:]]
+
+
+def importar_edicoes(planilha: list[dict], leads_vis: dict[str, dict]) -> int:
+    """Aplica no banco o que a equipe mudou/incluiu/apagou na planilha. Retorna nº de mudanças."""
+    from uuid import uuid4
+    from .leads import codigo
+    por_codigo: dict[str, list] = {}
+    for l in leads_vis.values():
+        por_codigo.setdefault(codigo(l), []).append(l)
+    vistos, n = set(), 0
+    for linha in planilha:
+        lid = (linha.get("ID") or "").strip()
+        if not lid and len(por_codigo.get((linha.get("Código") or "").strip().upper(), [])) == 1:
+            lid = por_codigo[linha["Código"].strip().upper()][0]["id"]
+        if lid in leads_vis:
+            vistos.add(lid)
+            snap = leads_vis[lid].get("planilha_snap") or {}
+            if not snap:
+                continue
+            upd = {}
+            for col in EDITAVEIS:
+                if col in linha and (linha[col] or "").strip() != (snap.get(col) or "").strip():
+                    upd.update(_converter(col, linha[col] or ""))
+            if upd:
+                db.update("leads", upd, {"id": f"eq.{lid}"})
+                n += 1
+        elif not lid and any((linha.get(k) or "").strip() for k in ("Cliente", "Telefone", "Veículo")):
+            novo = {"message_id": f"manual:{uuid4()}", "recebido_em": datas.agora().isoformat(),
+                    "tipo": "visita", "fila": "planilha", "historico": True}
+            for col in EDITAVEIS:
+                if (linha.get(col) or "").strip():
+                    novo.update(_converter(col, linha[col]))
+            db.insert("leads", novo)
+            n += 1
+    for lid, l in leads_vis.items():
+        if l.get("planilha_snap") and lid not in vistos:
+            db.update("leads", {"removido": True}, {"id": f"eq.{lid}"})
+            n += 1
+    return n
 
 
 def _garantir_aba(c: httpx.Client, aba: str) -> None:
@@ -88,18 +180,32 @@ def _garantir_aba(c: httpx.Client, aba: str) -> None:
            ).raise_for_status()
 
 
+def _visiveis() -> list[dict]:
+    return db.select_all("leads", {"select": "*", "removido": "eq.false", "order": "recebido_em.desc",
+                                   "data_agendada": f"gte.{DESDE}"})
+
+
 def sincronizar_leads() -> int:
-    """Reescreve a aba Agendamentos com os leads (não removidos) agendados a partir de DESDE,
-    do mais novo pro mais antigo."""
+    """Lê a planilha, aplica no banco as edições da equipe e reescreve a aba Agendamentos com os leads
+    agendados a partir de DESDE (mais novo primeiro) — só reescreve se algo mudou."""
     if not configurado():
         return 0
-    rows = db.select_all("leads", {"select": "*", "removido": "eq.false", "order": "recebido_em.desc",
-                                   "data_agendada": f"gte.{DESDE}"})
-    valores = linhas_leads(rows)
     with httpx.Client(base_url=_API, headers={"Authorization": f"Bearer {_token()}"},
                       verify=settings.verify_ssl, timeout=60) as c:
         _garantir_aba(c, ABA_AGENDAMENTOS)
-        c.post(f"/{settings.controle_sheet_id}/values/{ABA_AGENDAMENTOS}!A:Z:clear").raise_for_status()
-        c.put(f"/{settings.controle_sheet_id}/values/{ABA_AGENDAMENTOS}!A1",
-              params={"valueInputOption": "RAW"}, json={"values": valores}).raise_for_status()
+        planilha = _ler(c)
+        if importar_edicoes(planilha, {l["id"]: l for l in _visiveis()}):
+            from . import leads
+            leads.sujo["v"] = True
+        rows = _visiveis()
+        valores = linhas_leads(rows)
+        atual = [[linha.get(col, "") for col in CABECALHO] for linha in planilha]
+        if [CABECALHO] + atual != valores:
+            c.post(f"/{settings.controle_sheet_id}/values/{ABA_AGENDAMENTOS}!A:Z:clear").raise_for_status()
+            c.put(f"/{settings.controle_sheet_id}/values/{ABA_AGENDAMENTOS}!A1",
+                  params={"valueInputOption": "RAW"}, json={"values": valores}).raise_for_status()
+        for l, linha in zip(rows, valores[1:]):
+            snap = _snap(linha)
+            if l.get("planilha_snap") != snap:
+                db.update("leads", {"planilha_snap": snap}, {"id": f"eq.{l['id']}"})
     return len(valores) - 1

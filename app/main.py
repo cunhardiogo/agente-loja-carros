@@ -74,7 +74,7 @@ def _tick_inner() -> None:
         leads.checar_prazos()
     except Exception:
         log.exception("erro checando prazos de leads")
-    if leads.sujo["v"] or _time.time() - _ult_controle["t"] > 600:
+    if leads.sujo["v"] or _time.time() - _ult_controle["t"] > 120:  # lê edições da equipe a cada ~2 min
         _ult_controle["t"] = _time.time()
         leads.sujo["v"] = False
         try:
