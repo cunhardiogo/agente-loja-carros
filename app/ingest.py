@@ -32,6 +32,16 @@ def parse_pix(texto: str | None) -> float:
     return total
 
 
+# pedido de confirmação ao dono (pausado enquanto os processos dos grupos são remontados;
+# o evento fica 'pendente_confirmacao' e pode ser confirmado pelo painel)
+PERGUNTAR_DONO = False
+
+
+def _perguntar(texto: str) -> None:
+    if PERGUNTAR_DONO:
+        evolution.notificar_dono(texto)
+
+
 def grupo_por_jid(jid: str) -> dict | None:
     rows = db.select("grupos", {"jid": f"eq.{jid}", "ativo": "eq.true", "limit": "1"})
     return rows[0] if rows else None
@@ -410,18 +420,18 @@ def _executar(evento_id: str, grupo: dict, texto: str) -> dict:
         status = "ignorado_planilha"  # agendamento é controlado pela planilha
     elif ext.confianca < settings.confianca_minima:
         status = "pendente_confirmacao"
-        evolution.notificar_dono(_pergunta_confirmacao(ext, codigo))
+        _perguntar(_pergunta_confirmacao(ext, codigo))
     else:
         tabela, registro_id = aplicar(ext)
         if tabela == "duplicada":
             # nunca descarta calado: pergunta se é a mesma venda ou uma nova
             tabela, registro_id, status = None, None, "pendente_confirmacao"
-            evolution.notificar_dono(_pergunta_duplicada(ext, codigo))
+            _perguntar(_pergunta_duplicada(ext, codigo))
         elif registro_id:
             status = "auto"
         else:
             status = "pendente_confirmacao"
-            evolution.notificar_dono(_pergunta_confirmacao(ext, codigo))
+            _perguntar(_pergunta_confirmacao(ext, codigo))
 
     db.update("eventos_brutos", {
         "tipo_evento": ext.tipo_evento.value, "dados_extraidos": ext.model_dump(mode="json"),

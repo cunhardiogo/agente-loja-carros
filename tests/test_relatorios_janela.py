@@ -1,8 +1,22 @@
+import pytest
+
 from app import main
+
+
+@pytest.fixture(autouse=True)
+def _todos_ativos(monkeypatch):
+    # as janelas são testadas com todos os relatórios ligados (a pausa tem teste próprio)
+    monkeypatch.setattr(main, "RELATORIOS_ATIVOS", {"planejamento", "agenda", "fechamento", "semanal"})
 
 
 def _tipos(dow, hhmm):
     return {t for t, _ in main._jobs_relatorio(dow, hhmm)}
+
+
+def test_relatorios_pausados_nao_disparam(monkeypatch):
+    monkeypatch.setattr(main, "RELATORIOS_ATIVOS", {"planejamento", "agenda"})
+    assert _tipos(4, "18:30") == set() and _tipos(6, "18:30") == set()
+    assert _tipos(0, "09:30") == {"planejamento", "agenda"}
 
 
 def test_agenda_dentro_da_janela():

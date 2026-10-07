@@ -50,6 +50,11 @@ _ult_controle = {"t": 0.0}
 _lojasb_ok = {"v": True}
 _tick_lock = threading.Lock()
 
+# envios automáticos pausados enquanto os processos de cada grupo são remontados
+RELATORIOS_ATIVOS = {"planejamento", "agenda"}  # fechamento e semanal pausados
+RADAR_ATIVO = False       # alertas do supervisor e aviso de queda do número do agente
+LEMBRETES_ATIVOS = False
+
 
 def _tick() -> None:
     # serializa: o loop interno e um GET /health podem disparar juntos
@@ -65,10 +70,12 @@ def _tick_inner() -> None:
     if _time.time() - _ult_lembrete["t"] <= 55:
         return
     _ult_lembrete["t"] = _time.time()
-    _disparar_lembretes()
+    if LEMBRETES_ATIVOS:
+        _disparar_lembretes()
     _reaper_eventos()
-    _radar()
-    _checar_lojasb()
+    if RADAR_ATIVO:
+        _radar()
+        _checar_lojasb()
     _checar_relatorios()
     try:
         leads.checar_prazos()
@@ -149,9 +156,10 @@ def _reaper_eventos() -> int:
             log.exception("reaper: falha reprocessando %s", ev.get("id"))
             db.update("eventos_brutos", {"status": "erro"}, {"id": f"eq.{ev['id']}"})
             try:
-                evolution.notificar_dono(
-                    "⚠️ Não consegui processar uma mensagem de grupo (marquei como erro). "
-                    f"Trecho: {(ev.get('mensagem_original') or '')[:200]}")
+                if RADAR_ATIVO:
+                    evolution.notificar_dono(
+                        "⚠️ Não consegui processar uma mensagem de grupo (marquei como erro). "
+                        f"Trecho: {(ev.get('mensagem_original') or '')[:200]}")
             except Exception:
                 pass
     return n
@@ -229,10 +237,10 @@ def _jobs_relatorio(dow: int, hhmm: str) -> list:
         ("semanal", _resumo_semanal_texto, {6}, "18:00", "21:59"),
     ]
     return [(tipo, fn) for tipo, fn, dias, ini, fim in JANELAS
-            if dow in dias and ini <= hhmm <= fim]
+            if tipo in RELATORIOS_ATIVOS and dow in dias and ini <= hhmm <= fim]
 
 
-_SO_DONO = {"agenda"}  # relatórios que vão só pro MEU_NUMERO (os demais vão pra todos os destinatários)
+_SO_DONO = {"agenda", "planejamento"}  # relatórios que vão só pro MEU_NUMERO (os demais vão pra todos)
 
 
 def _checar_relatorios() -> None:
@@ -576,10 +584,7 @@ def _agenda_manha_texto() -> str:
     vendas = db.select_all("vendas", {"select": "cliente_nome,modelo,versao,status_entrega,data_entrega_prevista"})
     pend = [v for v in vendas if v.get("status_entrega") != "entregue"]
     hoje_ent = [v for v in pend if (v.get("data_entrega_prevista") or "")[:10] == hoje]
-    atras = [v for v in pend if v.get("data_entrega_prevista") and v["data_entrega_prevista"][:10] < hoje]
     ent_txt = ", ".join(f"{_carro(v)} ({v.get('cliente_nome') or ''})" for v in hoje_ent) if hoje_ent else "nenhuma"
-    atr_txt = ", ".join(f"{_carro(v)} ({v.get('cliente_nome') or ''}, {_dm(v['data_entrega_prevista'])})"
-                        for v in atras) if atras else "nenhuma"
 
     res = consulta.reservados("mes")
     res_txt = str(res["quantidade"])
@@ -589,19 +594,9 @@ def _agenda_manha_texto() -> str:
     linhas = [
         f"☀️ *Bom dia! Agenda de hoje* ({datas.hoje().strftime('%d/%m')})",
         f"🚗 Entregas marcadas hoje: {ent_txt}",
-        f"⚠️ Atrasadas p/ entregar: {atr_txt}",
         f"🅿️ Reservados aguardando: {res_txt}",
     ]
-
-    # lista "ligar hoje" (assistido): quem precisa de contato, com telefone
-    ligar = consulta.lista_ligar_hoje()["itens"]
-    if ligar:
-        linhas.append(f"\n📞 *Ligar hoje ({len(ligar)}):*")
-        for it in ligar[:8]:
-            tel = f" · {it['telefone']}" if it.get("telefone") else ""
-            linhas.append(f"• {it.get('cliente') or '—'} — {it['motivo']}{tel}")
-
-    if hoje_ent or atras:
+    if hoje_ent:
         linhas.append("\n👉 Já entregou alguma? Responde \"entreguei o [carro]\" que eu atualizo.")
     linhas.append("\n" + leads.agenda_do_dia_texto(hoje))
     return "\n".join(linhas)
@@ -728,7 +723,8 @@ def _planejamento_semana_texto() -> str:
     hoje = datas.hoje()
     ini = hoje - timedelta(days=hoje.weekday())
     fim = ini + timedelta(days=6)
-    ags = consulta.listar_agendamentos("semana")["agendamentos"]
+    ags = db.select_all("leads", {"select": "data_agendada", "removido": "eq.false",
+                                  "and": f"(data_agendada.gte.{ini.isoformat()},data_agendada.lte.{fim.isoformat()})"})
     entregas = consulta.entregas_agendadas("semana")["entregas"]
     estoque = consulta.listar_carros("a_anunciar")
     vlist = consulta.lista_vendas("tudo")
@@ -737,12 +733,7 @@ def _planejamento_semana_texto() -> str:
 
     from collections import Counter
     abrev = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
-    cont = Counter()
-    for a in ags:
-        try:
-            cont[_dt.fromisoformat(a["data"]).weekday()] += 1
-        except Exception:
-            pass
+    cont = Counter(_dt.fromisoformat(a["data_agendada"]).weekday() for a in ags)
     pordia = " · ".join(f"{abrev[d]} {cont[d]}" for d in range(7) if cont[d])
 
     L = [f"🗓️ *Planejamento da semana* ({ini.strftime('%d/%m')} a {fim.strftime('%d/%m')})",
