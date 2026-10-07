@@ -326,8 +326,10 @@ def texto_cobranca(l: dict) -> str:
 
 def checar_prazos(agora: datetime | None = None) -> int:
     agora = agora or datetime.now(timezone.utc)
+    # só negociação por telefone: é o lead em que o vendedor precisa entrar em contato
     abertos = db.select_all("leads", {"select": "*", "status": "eq.aguardando_retorno", "historico": "eq.false",
-                                      "removido": "eq.false", "ultimo_retorno_em": "is.null"})
+                                      "removido": "eq.false", "ultimo_retorno_em": "is.null",
+                                      "tipo": "eq.negociacao_telefone"})
     n = 0
     for l in abertos:
         idade = agora - _dt(l["recebido_em"])
@@ -414,3 +416,40 @@ def _enviar_cobranca(lead: dict, msg: str) -> str:
                         "cobranca_enviada_em": _iso(datetime.now(timezone.utc))}, {"id": f"eq.{lead['id']}"})
     sujo["v"] = True
     return f"✅ Cobrança enviada pro {lead.get('vendedor_nome')}."
+
+
+# ===== agenda da manhã =====
+def _ordem_horario(h: str | None) -> int:
+    a = _ascii(h)
+    m = re.search(r"(\d{1,2})\s*(?:h|:)?\s*(\d{2})?", a)
+    if m and int(m.group(1)) < 24:
+        return int(m.group(1)) * 60 + int(m.group(2) or 0)
+    if "manh" in a:
+        return 9 * 60
+    if "tarde" in a:
+        return 14 * 60
+    return 24 * 60
+
+
+def agenda_do_dia_texto(dia: str | None = None) -> str:
+    """Leads com data agendada pro dia (já com as edições da planilha), um resumo por lead."""
+    dia = dia or datas.hoje_iso()
+    rows = db.select_all("leads", {"select": "*", "removido": "eq.false", "data_agendada": f"eq.{dia}"})
+    rows.sort(key=lambda l: _ordem_horario(l.get("horario")))
+    if not rows:
+        return "📅 *Leads agendados pra hoje:* nenhum"
+    linhas = [f"📅 *Leads agendados pra hoje ({len(rows)}):*"]
+    for l in rows:
+        extra = " · ".join(x for x in (
+            f"troca: {l['troca']}" if l.get("troca") else "",
+            l.get("oferta_entrada") or "",
+            (l.get("observacao") or "").replace("\n", " · ")[:140] if not (l.get("troca") or l.get("oferta_entrada")) else "",
+        ) if x)
+        status = STATUS_LABEL.get(l["status"], l["status"])
+        linhas.append(
+            f"\n🕐 *{l.get('horario') or 'sem horário'}* — {l.get('cliente_nome') or '?'} · {l.get('veiculo') or '?'} [#{codigo(l)}]\n"
+            f"   👤 {l.get('vendedor_nome') or 'sem vendedor'} · SDR {l.get('sdr') or '?'} · "
+            f"{TIPO_LABEL.get(l['tipo'], l['tipo'])} · {l.get('canal') or '?'}\n"
+            + (f"   📝 {extra}\n" if extra else "")
+            + f"   📌 {status}" + (f" · 📞 {l['telefone']}" if l.get("telefone") else ""))
+    return "\n".join(linhas)

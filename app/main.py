@@ -562,15 +562,10 @@ def _reservado_carro(it: dict) -> str:
 
 def _agenda_manha_texto() -> str:
     hoje = datas.hoje_iso()
-    nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
-    ags = db.select_all("agendamentos", {"select": "cliente_nome,data_agendada,vendedor_id", "origem": "eq.planilha"})
-    hoje_ags = sorted([a for a in ags if (a.get("data_agendada") or "")[:10] == hoje],
-                      key=lambda a: a.get("data_agendada") or "")
-    def _h(a):
-        d = a.get("data_agendada") or ""
-        return (d[11:16] + "h ") if len(d) >= 16 and d[11:16] != "00:00" else ""
-    ag_txt = ", ".join(f"{a['cliente_nome']} {_h(a)}({nomes.get(a['vendedor_id'], '—')})".replace("  ", " ")
-                       for a in hoje_ags) if hoje_ags else "nenhum"
+    try:  # traz as edições da equipe na planilha de controle antes de listar
+        sheets.sincronizar_leads()
+    except Exception:
+        log.exception("erro lendo planilha de controle antes da agenda")
 
     vendas = db.select_all("vendas", {"select": "cliente_nome,modelo,versao,status_entrega,data_entrega_prevista"})
     pend = [v for v in vendas if v.get("status_entrega") != "entregue"]
@@ -587,7 +582,6 @@ def _agenda_manha_texto() -> str:
 
     linhas = [
         f"☀️ *Bom dia! Agenda de hoje* ({datas.hoje().strftime('%d/%m')})",
-        f"📅 Agendamentos: {len(hoje_ags)} — {ag_txt}",
         f"🚗 Entregas marcadas hoje: {ent_txt}",
         f"⚠️ Atrasadas p/ entregar: {atr_txt}",
         f"🅿️ Reservados aguardando: {res_txt}",
@@ -603,6 +597,7 @@ def _agenda_manha_texto() -> str:
 
     if hoje_ent or atras:
         linhas.append("\n👉 Já entregou alguma? Responde \"entreguei o [carro]\" que eu atualizo.")
+    linhas.append("\n" + leads.agenda_do_dia_texto(hoje))
     return "\n".join(linhas)
 
 

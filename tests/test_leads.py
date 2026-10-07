@@ -90,6 +90,22 @@ def test_prazos_avisa_30_e_propoe_60(monkeypatch):
     assert enviados[-1].startswith("📨") and "ABCD" in enviados[-1] and lead["cobranca_status"] == "proposta"
 
 
+def test_prazos_so_cobram_negociacao_telefone(monkeypatch):
+    filtros = []
+    monkeypatch.setattr(leads.db, "select_all", lambda t, p: filtros.append(p) or [])
+    leads.checar_prazos()
+    assert filtros[0]["tipo"] == "eq.negociacao_telefone"
+
+
+def test_agenda_do_dia_ordena_por_horario(monkeypatch):
+    rows = [_lead(id="bbbb0000", cliente_nome="Mônica", horario="A tarde", tipo="visita", troca="Onix 2019"),
+            _lead(id="aaaa0000", cliente_nome="Genilson", horario="11:00", tipo="visita", telefone="5521973620392")]
+    monkeypatch.setattr(leads.db, "select_all", lambda t, p: list(rows))
+    txt = leads.agenda_do_dia_texto("2026-10-07")
+    assert txt.index("Genilson") < txt.index("Mônica")
+    assert "(2)" in txt and "troca: Onix 2019" in txt and "📞 5521973620392" in txt and "[#AAAA]" in txt
+
+
 def _setup_aprovacao(monkeypatch, lead, telefone="5521981262421"):
     enviados, updates = [], []
 
