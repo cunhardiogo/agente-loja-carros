@@ -45,6 +45,7 @@ Regras:
 - valor_entrada = SOMA de TODOS os valores de pix/sinal/entrada já pagos. Some todas as parcelas do Pix, EXCETO as explicitamente marcadas como "será depositado/a depositar/restante/devolvido". NÃO inclua financiamento nem valor da troca. Se "Banco: A vista", valor_entrada = valor total. Exemplos: "A vista — Pix: 10.000 + 66.900" → 76900; "Pix: 1.000 sinal + 70.900" → 71900; "Pix: 3.000 Sinal + 55.900 será depositado" → 3000; "Pix: 1.000 Sinal será devolvido na troca" → 0.
 - Checkboxes "(X) Sim ( ) Não" → true; "( ) Sim (X) Não" → false.
 - Nos formulários, copie os campos LITERALMENTE: 'Modelo:' → modelo e 'Versão:' → versao exatamente como escritos. NÃO reinterprete nem mova valores entre marca/modelo/versao (ex.: 'Modelo: Audi' / 'Versão: A3' → modelo='Audi', versao='A3').
+- Grupo tipo "conversa" = conversa PRIVADA do dono com um sócio/gerente: extraia os mesmos eventos quando a mensagem afirmar um fato (venda feita, pagamento, entrega, carro chegando); pergunta, combinação, opinião ou papo → nenhum.
 - Nomes exatamente como aparecem; a resolução com o cadastro é feita depois.
 - Responda SOMENTE com o objeto estruturado."""
 

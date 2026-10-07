@@ -308,6 +308,15 @@ def _rotear_evento(body: dict) -> dict:
     if not texto:
         return {"ignored": "sem_conteudo"}
 
+    # conversa privada monitorada (cadastrada em grupos com o jid do contato):
+    # o coletor ingere as duas pontas, como se fosse um grupo
+    if not jid.endswith("@g.us") and not eh_assistente:
+        conversa = ingest.grupo_por_jid(jid)
+        if conversa:
+            return _ingerir(conversa, message_id,
+                            settings.meu_numero if from_me else jid.split("@")[0],
+                            data.get("pushName"), texto)
+
     # DM no número assistente -> consulta do dono (Fase 3)
     if not jid.endswith("@g.us"):
         if from_me:
@@ -326,14 +335,19 @@ def _rotear_evento(body: dict) -> dict:
     if not grupo:
         return {"ignored": "grupo_nao_monitorado", "jid": jid}
 
+    return _ingerir(grupo, message_id, key.get("participant"), data.get("pushName"), texto)
+
+
+def _ingerir(grupo: dict, message_id: str | None, remetente: str | None,
+             remetente_nome: str | None, texto: str) -> dict:
     if ingest.ja_processada(message_id):
         return {"ignored": "duplicada", "message_id": message_id}
 
     res = ingest.processar(
         grupo=grupo,
         message_id=message_id,
-        remetente=key.get("participant"),
-        remetente_nome=data.get("pushName"),
+        remetente=remetente,
+        remetente_nome=remetente_nome,
         texto=texto,
         timestamp_msg=None,
     )
