@@ -82,7 +82,7 @@ def resumo_vendas(periodo: str = "mes", vendedor: str | None = None,
         vid = v["id"] if v else None
         if vendedor and not vid:
             return {"erro": f"Vendedor '{vendedor}' não encontrado no cadastro."}
-    rows = db.select_all("vendas", {"select": "valor_venda,data_venda,vendedor_id,over_valor"})
+    rows = _vendas_validas("valor_venda,data_venda,vendedor_id,over_valor")
     rows = [r for r in rows if _dentro(r.get("data_venda"), ini, fim) and (not vid or r.get("vendedor_id") == vid)]
     total = sum((r.get("valor_venda") or 0) for r in rows)
     over = sum(_num(r.get("over_valor")) for r in rows)
@@ -97,8 +97,7 @@ def resumo_vendas(periodo: str = "mes", vendedor: str | None = None,
 def ranking_vendedores(periodo: str = "mes", data_inicio: str | None = None, data_fim: str | None = None) -> dict:
     ini, fim = _resolve(periodo, data_inicio, data_fim)
     nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
-    rows = db.select_all("vendas", {"select": "valor_venda,data_venda,vendedor_id"})
-    rows = [r for r in rows if _dentro(r.get("data_venda"), ini, fim)]
+    rows = [r for r in _vendas_validas("valor_venda,data_venda,vendedor_id") if _dentro(r.get("data_venda"), ini, fim)]
     agg: dict = {}
     for r in rows:
         vid = r.get("vendedor_id")
@@ -209,13 +208,61 @@ def listar_agendamentos(periodo: str = "hoje") -> dict:
 
 
 def vendidos(periodo: str = "mes", data_inicio: str | None = None, data_fim: str | None = None) -> dict:
-    """Quantos carros VENDIDOS no período, segundo a planilha (Status=VENDIDO)."""
+    """Quantos carros VENDIDOS no período, segundo o grupo de vendas (conta no aviso; resumo é pendência)."""
     ini, fim = _resolve(periodo, data_inicio, data_fim)
-    rows = db.select_all("agendamentos", {"select": "cliente_nome,data_agendada,resultado,observacoes",
-                                      "origem": "eq.planilha"})
-    rows = [r for r in rows if (r.get("resultado") or "").strip().lower() == "vendido"
-            and _dentro(r.get("data_agendada"), ini, fim)]
-    return {"periodo": periodo, "quantidade": len(rows), "itens": rows}
+    nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
+    rows = [r for r in _vendas_validas("modelo,versao,placa,data_venda,vendedor_id,status_venda,cliente_nome")
+            if _dentro(r.get("data_venda"), ini, fim)]
+    itens = [{"carro": " ".join(x for x in (r.get("modelo"), r.get("versao"), r.get("placa")) if x),
+              "vendedor": nomes.get(r.get("vendedor_id")), "data": r.get("data_venda"),
+              "cliente": r.get("cliente_nome"), "resumo": r["status_venda"] == "completa"} for r in rows]
+    return {"periodo": periodo, "quantidade": len(rows), "itens": itens}
+
+
+def _vendas_validas(select: str) -> list[dict]:
+    """Vendas que contam: não removidas, nem reserva, nem desistência."""
+    return db.select_all("vendas", {"select": select, "removido": "eq.false",
+                                    "status_venda": "in.(completa,aguardando_resumo)"})
+
+
+def vendas_pendentes() -> dict:
+    """Vendas do grupo com algo pendente: sem resumo, resumo incompleto, reserva em aberto."""
+    from .vendas_grupo import codigo, prazo_resumo
+    from .leads import _dt
+    nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
+    rows = db.select_all("vendas", {"select": "*", "removido": "eq.false", "origem": "eq.grupo",
+                                    "status_venda": "in.(aguardando_resumo,completa,reservado)"})
+    carro = lambda r: " ".join(x for x in (r.get("modelo"), r.get("versao"), r.get("placa")) if x)
+    return {
+        "sem_resumo": [{"codigo": codigo(r), "carro": carro(r), "vendedor": nomes.get(r.get("vendedor_id")),
+                        "avisada_em": _fmt_local(r.get("aviso_em")),
+                        "prazo": prazo_resumo(_dt(r["aviso_em"])).strftime("%d/%m %H:%M") if r.get("aviso_em") else None}
+                       for r in rows if r["status_venda"] == "aguardando_resumo"],
+        "resumo_incompleto": [{"codigo": codigo(r), "carro": carro(r), "vendedor": nomes.get(r.get("vendedor_id")),
+                               "faltando": r.get("pendencias")}
+                              for r in rows if r["status_venda"] == "completa" and r.get("pendencias")],
+        "reservas": [{"codigo": codigo(r), "carro": carro(r), "vendedor": nomes.get(r.get("vendedor_id")),
+                      "desde": _fmt_local(r.get("reservado_em"))} for r in rows if r["status_venda"] == "reservado"],
+    }
+
+
+def buscar_venda(termo: str) -> dict:
+    """Uma venda por carro, placa ou cliente, com pagamentos (comprovantes) e documentos recebidos."""
+    t = db.ilike(termo)
+    rows = db.select("vendas", {"select": "*", "removido": "eq.false", "order": "created_at.desc", "limit": "8",
+                                "or": f"(modelo.{t},versao.{t},placa.{t},cliente_nome.{t})"})
+    nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
+    out = []
+    for r in rows:
+        pags = db.select("pagamentos", {"select": "valor,pago_em,tipo,banco,id_transacao", "venda_id": f"eq.{r['id']}"})
+        out.append({k: r.get(k) for k in ("modelo", "versao", "ano", "cor", "placa", "status_venda", "data_venda",
+                                          "tabela_preco", "valor_venda", "desconto", "over_valor", "valor_total",
+                                          "banco", "valor_financiado", "valor_pix", "troca_modelo", "troca_valor",
+                                          "cliente_nome", "cliente_telefone", "portal_venda",
+                                          "data_entrega_prevista", "data_entrega_texto", "valor_pago",
+                                          "status_pagamento", "docs", "pendencias", "observacoes")}
+                   | {"vendedor": nomes.get(r.get("vendedor_id")), "pagamentos": pags})
+    return {"encontradas": len(out), "vendas": out}
 
 
 def _range_futuro(periodo: str | None):
@@ -469,9 +516,9 @@ def historico_cliente(nome: str) -> dict:
     if not n:
         return {"erro": "diga o nome do cliente"}
     ag = db.select_all("agendamentos", {"select": "cliente_nome,data_agendada,resultado,observacoes",
-                                    "cliente_nome": db.ilike(n), "origem": "eq.planilha"})
+                                    "cliente_nome": db.ilike_simples(n), "origem": "eq.planilha"})
     vd = db.select_all("vendas", {"select": "cliente_nome,modelo,versao,valor_venda,data_venda,"
-                              "status_entrega,status_pagamento,portal_venda", "cliente_nome": db.ilike(n)})
+                              "status_entrega,status_pagamento,portal_venda", "cliente_nome": db.ilike_simples(n)})
     return {"cliente": n, "agendamentos": ag, "vendas": vd,
             "encontrou": bool(ag or vd)}
 
@@ -791,6 +838,8 @@ def _fmt_data_sp(iso: str) -> str:
 
 
 DISPATCH = {
+    "vendas_pendentes": vendas_pendentes,
+    "buscar_venda": buscar_venda,
     "leads_abertos": leads_abertos,
     "buscar_lead": buscar_lead,
     "resumo_leads": resumo_leads,
@@ -837,6 +886,16 @@ _DI = {"type": "string", "description": "Data início ISO YYYY-MM-DD (opcional, 
 _DF = {"type": "string", "description": "Data fim ISO YYYY-MM-DD (opcional)"}
 
 TOOLS = [
+    {"type": "function", "function": {
+        "name": "vendas_pendentes",
+        "description": "Vendas do grupo com pendência: avisadas sem Resumo de Venda (com prazo), resumos incompletos (campos faltando) e reservas em aberto.",
+        "parameters": {"type": "object", "properties": {}},
+    }},
+    {"type": "function", "function": {
+        "name": "buscar_venda",
+        "description": "Procura uma venda por carro, placa ou cliente e mostra tudo: valores, forma de pagamento, troca, portal, entrega, pagamentos já comprovados (valor, data, id da transação), documentos recebidos e pendências.",
+        "parameters": {"type": "object", "properties": {"termo": {"type": "string"}}, "required": ["termo"]},
+    }},
     {"type": "function", "function": {
         "name": "leads_abertos",
         "description": "Leads do grupo de agendamento ainda sem desfecho (aguardando retorno, confirmado, negociando, remarcado...). Filtra por vendedor ou SDR.",
@@ -1071,7 +1130,7 @@ TOOLS = [
 SYSTEM = """Você é o assistente da Loja SB (revenda de carros) respondendo o DONO no WhatsApp.
 Use SEMPRE as ferramentas para buscar dados reais — nunca invente números.
 
-CONTAGEM x VALOR: para CONTAR vendidos use 'vendidos' (fonte oficial = planilha). Para FATURAMENTO/ticket/over use 'resumo_vendas'.
+CONTAGEM x VALOR: para CONTAR vendidos use 'vendidos' (fonte oficial = grupo de VENDAS; a venda conta no aviso "vendido", o Resumo de Venda é pendência). Para FATURAMENTO/ticket/over use 'resumo_vendas'.
 SEMPRE que falar de vendas/faturamento/financeiro, informe os DOIS juntos: FATURAMENTO (resumo_vendas) E A RECEBER (pendencias pagamento).
 
 PERÍODOS: quando o usuário não disser, assuma o mês atual. Para períodos livres ("semana passada", "dia 5", "em maio", "últimos 7 dias"), \
@@ -1086,6 +1145,7 @@ LEMBRETES: criar_lembrete quando o dono pedir p/ ser lembrado (calcule 'quando' 
 SUPERVISOR: você é proativo. radar mostra os alertas abertos (carro encalhado, a receber parado, entrega atrasada, comparecimento baixo, sistema fora) — use quando perguntarem 'o que preciso resolver?'/'como está a operação?', e resolver_alerta p/ baixar um. anotar salva recado livre sem horário; listar_notas/resolver_nota gerenciam. pendências (listar_pendencias) mostra o que aguarda sua confirmação.
 SECRETÁRIA (assistido — você organiza, o DONO contata): lista_ligar_hoje dá quem ligar hoje (faltas de ontem, reservas paradas, entrega atrasada, a receber) com telefone — use em 'quem preciso contatar?'/'tem alguém pra ligar?'. mensagem_cobranca monta um texto pronto e educado de cobrança pra um cliente com saldo (ex 'manda uma cobrança pro João'); ENTREGUE o texto pro dono copiar/encaminhar e deixe claro que ele revisa e envia — você NUNCA manda direto pro cliente.
 LEADS (grupo Agendamento SDR — fonte oficial de visitas e negociações por telefone): use leads_abertos, buscar_lead e resumo_leads para qualquer pergunta sobre agendamentos, leads, SDRs, retorno de vendedor e cobranças. Tipos: Visita (horário na loja), Negociação telefone, Turno (horário e vendedor definidos).
+VENDAS do grupo: vendas_pendentes (sem resumo, resumo incompleto, reservas) e buscar_venda (detalhe de uma venda com comprovantes de pagamento).
 
 ESTILO: curto e direto, em português, valores como R$ 95.000, listas em linhas curtas com emojis discretos. \
 Quando fizer sentido, acrescente UM insight curto (ex.: quem está puxando o mês, alerta de comparecimento/entrega atrasada) — sem encher. \

@@ -122,3 +122,33 @@ def extrair_nota_lead(observacao: str) -> dict:
         messages=[{"role": "system", "content": NOTA_LEAD_SYSTEM}, {"role": "user", "content": observacao}])
     d = json.loads(resp.choices[0].message.content or "{}")
     return {k: (str(d[k])[:300] if d.get(k) else None) for k in ("troca", "oferta_entrada")}
+
+
+DOC_SYSTEM = """Você classifica um documento enviado no grupo de vendas de uma loja de carros.
+Responda SOMENTE um JSON com:
+- "tipo": "comprovante_pagamento", "cnh", "documento_identidade", "comprovante_residencia", "contrato", "foto_carro" ou "outro"
+  · comprovante_pagamento = comprovante de uma transação JÁ REALIZADA (Pix enviado, TED/transferência efetuada, pagamento concluído, recibo). Tem status como "realizado", "efetuado", "concluído", "enviado".
+  · conta, fatura ou boleto A PAGAR (luz, água, gás, telefone, internet, cartão — com vencimento, código de barras ou QR Code para pagar) é "comprovante_residencia", NUNCA comprovante_pagamento.
+Se e SOMENTE se for comprovante_pagamento, inclua também:
+- "valor": número em reais (ex 1500.00)
+- "pago_em": data e hora do pagamento EXATAMENTE como aparecem no comprovante (horário de Brasília, sem converter fuso), em ISO "YYYY-MM-DDTHH:MM:SS" sem "Z" (só a data se não houver hora)
+- "id_transacao": o identificador único da transação (ID/E2E do Pix começando com E, nº de autenticação ou de controle), exatamente como escrito, ou null
+- "forma": "pix", "ted", "cartao", "boleto" ou "outro"
+- "banco": banco/instituição do comprovante
+- "pagador": nome de quem pagou
+- "recebedor": nome de quem recebeu
+Para os demais tipos NÃO transcreva nenhum dado pessoal: devolva só o "tipo"."""
+
+
+def ler_documento(texto: str | None = None, image_b64: str | None = None, mimetype: str | None = None,
+                  nome_arquivo: str | None = None) -> dict:
+    if _client is None:
+        return {}
+    import json
+    conteudo: list = [{"type": "text", "text": f"Arquivo: {nome_arquivo or '-'}\n\n{(texto or '')[:6000]}"}]
+    if image_b64:
+        conteudo.append({"type": "image_url", "image_url": {"url": f"data:{mimetype or 'image/jpeg'};base64,{image_b64}"}})
+    resp = _client.chat.completions.create(
+        model=settings.openai_model_extracao, temperature=0, response_format={"type": "json_object"},
+        messages=[{"role": "system", "content": DOC_SYSTEM}, {"role": "user", "content": conteudo}])
+    return json.loads(resp.choices[0].message.content or "{}")

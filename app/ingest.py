@@ -89,7 +89,7 @@ def _venda_existente(ext: Extracao) -> dict | None:
         return None
     desde = (datas.agora() - timedelta(hours=48)).isoformat()
     rows = db.select("vendas", {
-        "select": "id,cliente_nome,modelo,versao,placa", "cliente_nome": db.ilike(ext.cliente_nome),
+        "select": "id,cliente_nome,modelo,versao,placa", "cliente_nome": db.ilike_simples(ext.cliente_nome),
         "created_at": f"gte.{desde}", "order": "created_at.desc",
     })
     for r in rows:
@@ -165,7 +165,7 @@ def _agendamento_recente(cliente: str | None) -> dict | None:
     if not cliente:
         return None
     rows = db.select("agendamentos", {
-        "select": "id,cliente_nome", "cliente_nome": db.ilike(cliente),
+        "select": "id,cliente_nome", "cliente_nome": db.ilike_simples(cliente),
         "order": "data_agendada.desc.nullslast", "limit": "1",
     })
     return rows[0] if rows else None
@@ -291,7 +291,7 @@ def aplicar(ext: Extracao, forcar_venda: bool = False) -> tuple[str | None, str 
         if not alvo:
             return None, None
         rows = db.select("veiculos", {"select": "id", "status": "eq.a_anunciar",
-                                      "modelo": db.ilike(alvo), "order": "created_at.desc", "limit": "1"})
+                                      "modelo": db.ilike_simples(alvo), "order": "created_at.desc", "limit": "1"})
         if not rows:
             return None, None
         db.update("veiculos", {"status": "anunciado"}, {"id": f"eq.{rows[0]['id']}"})

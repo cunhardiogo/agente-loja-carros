@@ -1,4 +1,5 @@
-"""Planilha de controle (Google Sheets) — espelho dos leads do grupo de agendamento.
+"""Planilha de controle (Google Sheets): abas Agendamentos e Vendas (nos dois sentidos — a equipe edita,
+inclui e apaga linhas) e Pagamentos (só saída).
 Escrita na planilha CONTROLE_SHEET_ID por conta de serviço (GOOGLE_SA_JSON) ou por
 cliente OAuth com refresh token (GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN)."""
 import base64
@@ -13,7 +14,7 @@ from .config import settings
 log = logging.getLogger("agente")
 
 ABA_AGENDAMENTOS = "Agendamentos"
-# a planilha começa em outubro/2026: leads com agendamento antes disso ficam só no banco
+# a planilha começa em outubro/2026: o que for anterior fica só no banco
 DESDE = "2026-10-01"
 _API = "https://sheets.googleapis.com/v4/spreadsheets"
 _SCOPE = "https://www.googleapis.com/auth/spreadsheets"
@@ -61,6 +62,13 @@ def _fmt_d(iso: str | None) -> str:
     return f"{iso[8:10]}/{iso[5:7]}/{iso[:4]}" if iso else ""
 
 
+def _num(v) -> str:
+    if v is None:
+        return ""
+    return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+# ===== aba Agendamentos =====
 # colunas que a equipe pode editar na planilha → campo do lead
 EDITAVEIS = {"SDR": "sdr", "Tipo": "tipo", "Cliente": "cliente_nome", "Telefone": "telefone",
              "Data": "data_agendada", "Horário": "horario", "Veículo": "veiculo", "Vendedor": "vendedor_nome",
@@ -122,8 +130,9 @@ def _converter(col: str, valor: str) -> dict:
     return {campo: v or None}
 
 
-def _ler(c: httpx.Client) -> list[dict]:
-    r = c.get(f"/{settings.controle_sheet_id}/values/{ABA_AGENDAMENTOS}!A:Z")
+# ===== motor comum =====
+def _ler(c: httpx.Client, aba: str = ABA_AGENDAMENTOS) -> list[dict]:
+    r = c.get(f"/{settings.controle_sheet_id}/values/{aba}!A:AZ")
     r.raise_for_status()
     vals = r.json().get("values", [])
     if not vals:
@@ -132,43 +141,49 @@ def _ler(c: httpx.Client) -> list[dict]:
     return [{cab[i]: (linha[i] if i < len(linha) else "") for i in range(len(cab))} for linha in vals[1:]]
 
 
-def importar_edicoes(planilha: list[dict], leads_vis: dict[str, dict]) -> int:
-    """Aplica no banco o que a equipe mudou/incluiu/apagou na planilha. Retorna nº de mudanças."""
-    from uuid import uuid4
-    from .leads import codigo
+def _importar(planilha: list[dict], vis: dict[str, dict], editaveis: dict, converter, tabela: str,
+              codigo, chaves_novo: tuple, novo_base) -> int:
+    """Aplica no banco o que a equipe mudou/incluiu/apagou numa aba. Retorna nº de mudanças."""
     por_codigo: dict[str, list] = {}
-    for l in leads_vis.values():
-        por_codigo.setdefault(codigo(l), []).append(l)
+    for r in vis.values():
+        por_codigo.setdefault(codigo(r), []).append(r)
     vistos, n = set(), 0
     for linha in planilha:
-        lid = (linha.get("ID") or "").strip()
-        if not lid and len(por_codigo.get((linha.get("Código") or "").strip().upper(), [])) == 1:
-            lid = por_codigo[linha["Código"].strip().upper()][0]["id"]
-        if lid in leads_vis:
-            vistos.add(lid)
-            snap = leads_vis[lid].get("planilha_snap") or {}
+        rid = (linha.get("ID") or "").strip()
+        if not rid and len(por_codigo.get((linha.get("Código") or "").strip().upper(), [])) == 1:
+            rid = por_codigo[linha["Código"].strip().upper()][0]["id"]
+        if rid in vis:
+            vistos.add(rid)
+            snap = vis[rid].get("planilha_snap") or {}
             if not snap:
                 continue
             upd = {}
-            for col in EDITAVEIS:
+            for col in editaveis:
                 if col in linha and (linha[col] or "").strip() != (snap.get(col) or "").strip():
-                    upd.update(_converter(col, linha[col] or ""))
+                    upd.update(converter(col, linha[col] or ""))
             if upd:
-                db.update("leads", upd, {"id": f"eq.{lid}"})
+                db.update(tabela, upd, {"id": f"eq.{rid}"})
                 n += 1
-        elif not lid and any((linha.get(k) or "").strip() for k in ("Cliente", "Telefone", "Veículo")):
-            novo = {"message_id": f"manual:{uuid4()}", "recebido_em": datas.agora().isoformat(),
-                    "tipo": "visita", "fila": "planilha", "historico": True}
-            for col in EDITAVEIS:
+        elif not rid and any((linha.get(k) or "").strip() for k in chaves_novo):
+            novo = novo_base()
+            for col in editaveis:
                 if (linha.get(col) or "").strip():
-                    novo.update(_converter(col, linha[col]))
-            db.insert("leads", novo)
+                    novo.update(converter(col, linha[col]))
+            db.insert(tabela, novo)
             n += 1
-    for lid, l in leads_vis.items():
-        if l.get("planilha_snap") and lid not in vistos:
-            db.update("leads", {"removido": True}, {"id": f"eq.{lid}"})
+    for rid, r in vis.items():
+        if r.get("planilha_snap") and rid not in vistos:
+            db.update(tabela, {"removido": True}, {"id": f"eq.{rid}"})
             n += 1
     return n
+
+
+def importar_edicoes(planilha: list[dict], leads_vis: dict[str, dict]) -> int:
+    from uuid import uuid4
+    from .leads import codigo
+    return _importar(planilha, leads_vis, EDITAVEIS, _converter, "leads", codigo, ("Cliente", "Telefone", "Veículo"),
+                     lambda: {"message_id": f"manual:{uuid4()}", "recebido_em": datas.agora().isoformat(),
+                              "tipo": "visita", "fila": "planilha", "historico": True})
 
 
 def _garantir_aba(c: httpx.Client, aba: str) -> None:
@@ -180,32 +195,171 @@ def _garantir_aba(c: httpx.Client, aba: str) -> None:
            ).raise_for_status()
 
 
+def _escrever_se_mudou(c: httpx.Client, aba: str, cabecalho: list[str], planilha: list[dict],
+                       valores: list[list[str]]) -> None:
+    atual = [[linha.get(col, "") for col in cabecalho] for linha in planilha]
+    if [cabecalho] + atual != valores:
+        c.post(f"/{settings.controle_sheet_id}/values/{aba}!A:AZ:clear").raise_for_status()
+        c.put(f"/{settings.controle_sheet_id}/values/{aba}!A1",
+              params={"valueInputOption": "RAW"}, json={"values": valores}).raise_for_status()
+
+
+def _gravar_snaps(tabela: str, rows: list[dict], valores: list[list[str]], cabecalho: list[str], editaveis) -> None:
+    for r, linha in zip(rows, valores[1:]):
+        snap = {col: linha[cabecalho.index(col)] for col in editaveis}
+        if r.get("planilha_snap") != snap:
+            db.update(tabela, {"planilha_snap": snap}, {"id": f"eq.{r['id']}"})
+
+
+def _cliente() -> httpx.Client:
+    return httpx.Client(base_url=_API, headers={"Authorization": f"Bearer {_token()}"},
+                        verify=settings.verify_ssl, timeout=60)
+
+
 def _visiveis() -> list[dict]:
     return db.select_all("leads", {"select": "*", "removido": "eq.false", "order": "recebido_em.desc",
                                    "data_agendada": f"gte.{DESDE}"})
 
 
-def sincronizar_leads() -> int:
-    """Lê a planilha, aplica no banco as edições da equipe e reescreve a aba Agendamentos com os leads
-    agendados a partir de DESDE (mais novo primeiro) — só reescreve se algo mudou."""
+def sincronizar_leads(c: httpx.Client | None = None) -> int:
+    """Lê a aba Agendamentos, aplica no banco as edições da equipe e reescreve com os leads agendados a
+    partir de DESDE (mais novo primeiro) — só reescreve se algo mudou."""
     if not configurado():
         return 0
-    with httpx.Client(base_url=_API, headers={"Authorization": f"Bearer {_token()}"},
-                      verify=settings.verify_ssl, timeout=60) as c:
-        _garantir_aba(c, ABA_AGENDAMENTOS)
-        planilha = _ler(c)
-        if importar_edicoes(planilha, {l["id"]: l for l in _visiveis()}):
-            from . import leads
-            leads.sujo["v"] = True
-        rows = _visiveis()
-        valores = linhas_leads(rows)
-        atual = [[linha.get(col, "") for col in CABECALHO] for linha in planilha]
-        if [CABECALHO] + atual != valores:
-            c.post(f"/{settings.controle_sheet_id}/values/{ABA_AGENDAMENTOS}!A:Z:clear").raise_for_status()
-            c.put(f"/{settings.controle_sheet_id}/values/{ABA_AGENDAMENTOS}!A1",
-                  params={"valueInputOption": "RAW"}, json={"values": valores}).raise_for_status()
-        for l, linha in zip(rows, valores[1:]):
-            snap = _snap(linha)
-            if l.get("planilha_snap") != snap:
-                db.update("leads", {"planilha_snap": snap}, {"id": f"eq.{l['id']}"})
+    if c is None:
+        with _cliente() as c2:
+            return sincronizar_leads(c2)
+    _garantir_aba(c, ABA_AGENDAMENTOS)
+    planilha = _ler(c, ABA_AGENDAMENTOS)
+    if importar_edicoes(planilha, {l["id"]: l for l in _visiveis()}):
+        from . import leads
+        leads.sujo["v"] = True
+    rows = _visiveis()
+    valores = linhas_leads(rows)
+    _escrever_se_mudou(c, ABA_AGENDAMENTOS, CABECALHO, planilha, valores)
+    _gravar_snaps("leads", rows, valores, CABECALHO, EDITAVEIS)
     return len(valores) - 1
+
+
+# ===== aba Vendas (dois sentidos) =====
+ABA_VENDAS = "Vendas"
+CAB_VENDAS = ["Data venda", "Vendedor", "Carro", "Versão", "Ano", "Cor", "Placa", "Status", "Tabela", "Vendido",
+              "Desconto", "Over", "Total", "Banco", "Financiado", "Pix / pagamento", "Troca", "Cliente", "CPF",
+              "Telefone", "E-mail", "Portal", "Entrega prevista", "Pago (comprovantes)", "Situação pgto", "Docs",
+              "Pendências", "Observação", "Cobrança", "Código", "ID"]
+EDIT_VENDAS = {"Data venda": "data_venda", "Vendedor": "vendedor_id", "Carro": "modelo", "Versão": "versao",
+               "Ano": "ano", "Cor": "cor", "Placa": "placa", "Status": "status_venda", "Tabela": "tabela_preco",
+               "Vendido": "valor_venda", "Desconto": "desconto", "Over": "over_valor", "Total": "valor_total",
+               "Banco": "banco", "Financiado": "valor_financiado", "Pix / pagamento": "valor_pix",
+               "Troca": "troca_modelo", "Cliente": "cliente_nome", "CPF": "cliente_cpf",
+               "Telefone": "cliente_telefone", "E-mail": "cliente_email", "Portal": "portal_venda",
+               "Entrega prevista": "data_entrega_prevista", "Observação": "observacoes"}
+_DOC_ROTULO = {"cnh": "CNH", "documento_identidade": "RG", "comprovante_residencia": "Residência", "contrato": "Contrato"}
+
+
+def _linha_venda(v: dict, nomes: dict) -> list[str]:
+    from .vendas_grupo import STATUS_LABEL, codigo
+    docs = v.get("docs") or {}
+    docs_txt = " · ".join(lbl for k, lbl in _DOC_ROTULO.items() if docs.get(k))
+    if docs.get("comprovantes"):
+        docs_txt = " · ".join(x for x in (docs_txt, f"{docs['comprovantes']} comprovante(s)") if x)
+    return [
+        _fmt_d(v.get("data_venda")), nomes.get(v.get("vendedor_id"), ""), v.get("modelo") or "",
+        v.get("versao") or "", str(v.get("ano") or ""), v.get("cor") or "", v.get("placa") or "",
+        STATUS_LABEL.get(v.get("status_venda"), v.get("status_venda") or ""), _num(v.get("tabela_preco")),
+        _num(v.get("valor_venda")), _num(v.get("desconto")), v.get("over_valor") or "", _num(v.get("valor_total")),
+        v.get("banco") or "", _num(v.get("valor_financiado")), v.get("valor_pix") or "", v.get("troca_modelo") or "",
+        v.get("cliente_nome") or "", v.get("cliente_cpf") or "", v.get("cliente_telefone") or "",
+        v.get("cliente_email") or "", v.get("portal_venda") or "",
+        _fmt_d(v.get("data_entrega_prevista")) or (v.get("data_entrega_texto") or ""),
+        _num(v.get("valor_pago")) if v.get("valor_pago") else "", v.get("status_pagamento") or "", docs_txt,
+        ", ".join(v.get("pendencias") or []), v.get("observacoes") or "", v.get("cobranca_status") or "",
+        codigo(v), v["id"],
+    ]
+
+
+def _converter_venda(col: str, valor: str) -> dict:
+    from .leads import _ascii, _data
+    from .vendas_grupo import STATUS_LABEL, _valor, placa_norm, vendedor_por_nome
+    v = valor.strip()
+    campo = EDIT_VENDAS[col]
+    if col in ("Data venda", "Entrega prevista"):
+        d = _data(v, datas.hoje())
+        out = {campo: d.isoformat() if d else None}
+        if col == "Entrega prevista":
+            out["data_entrega_texto"] = v or None
+        return out
+    if col == "Vendedor":
+        vend = vendedor_por_nome(v)
+        return {"vendedor_id": vend["id"] if vend else None}
+    if col == "Status":
+        rev = {_ascii(lbl): k for k, lbl in STATUS_LABEL.items()}
+        a = _ascii(v)
+        return {"status_venda": rev.get(a) or ("reservado" if "reserv" in a else "desistiu" if "desist" in a
+                                               else "aguardando_resumo" if "aguard" in a else "completa")}
+    if col == "Ano":
+        return {"ano": int(v) if v.isdigit() else None}
+    if col == "Placa":
+        return {"placa": placa_norm(v) or v or None}
+    if campo in ("tabela_preco", "valor_venda", "desconto", "valor_total", "valor_financiado"):
+        return {campo: _valor(v)}
+    return {campo: v or None}
+
+
+def _vendas_visiveis() -> list[dict]:
+    rows = db.select_all("vendas", {"select": "*", "removido": "eq.false", "origem": "in.(grupo,planilha)",
+                                    "order": "data_venda.desc.nullsfirst,created_at.desc"})
+    return [v for v in rows if (v.get("data_venda") or v["created_at"][:10]) >= DESDE]
+
+
+def sincronizar_vendas(c: httpx.Client) -> int:
+    from uuid import uuid4
+    from . import vendas_grupo
+    _garantir_aba(c, ABA_VENDAS)
+    planilha = _ler(c, ABA_VENDAS)
+    vis = {v["id"]: v for v in _vendas_visiveis()}
+    if _importar(planilha, vis, EDIT_VENDAS, _converter_venda, "vendas", vendas_grupo.codigo,
+                 ("Carro", "Placa", "Cliente"),
+                 lambda: {"origem": "planilha", "status_venda": "completa", "historico": True,
+                          "aviso_message_id": f"manual:{uuid4()}"}):
+        for v in _vendas_visiveis():  # a equipe pode ter completado o resumo pela planilha
+            pend = vendas_grupo.pendencias_venda(v)
+            if pend != (v.get("pendencias") or []):
+                db.update("vendas", {"pendencias": pend}, {"id": f"eq.{v['id']}"})
+        vendas_grupo.sujo["v"] = True
+    rows = _vendas_visiveis()
+    nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
+    valores = [CAB_VENDAS] + [_linha_venda(v, nomes) for v in rows]
+    _escrever_se_mudou(c, ABA_VENDAS, CAB_VENDAS, planilha, valores)
+    _gravar_snaps("vendas", rows, valores, CAB_VENDAS, EDIT_VENDAS)
+    return len(rows)
+
+
+# ===== aba Pagamentos (só saída) =====
+ABA_PAGAMENTOS = "Pagamentos"
+CAB_PAGAMENTOS = ["Recebido em", "Pago em", "Valor", "Forma", "Banco", "Pagador", "Recebedor", "ID transação",
+                  "Venda", "Arquivo"]
+
+
+def sincronizar_pagamentos(c: httpx.Client) -> int:
+    _garantir_aba(c, ABA_PAGAMENTOS)
+    planilha = _ler(c, ABA_PAGAMENTOS)
+    pags = db.select_all("pagamentos", {"select": "*", "recebido_em": f"gte.{DESDE}", "order": "recebido_em.desc"})
+    vendas = {v["id"]: v for v in db.select_all("vendas", {"select": "id,modelo,placa"})}
+    valores = [CAB_PAGAMENTOS]
+    for p in pags:
+        v = vendas.get(p.get("venda_id"))
+        venda = " ".join(x for x in (v.get("modelo"), v.get("placa")) if x) if v else "sem venda ligada"
+        valores.append([_fmt_dt(p["recebido_em"]), _fmt_dt(p.get("pago_em")), _num(p.get("valor")),
+                        p.get("tipo") or "", p.get("banco") or "", p.get("pagador") or "", p.get("recebedor") or "",
+                        p.get("id_transacao") or "", venda, p.get("arquivo") or ""])
+    _escrever_se_mudou(c, ABA_PAGAMENTOS, CAB_PAGAMENTOS, planilha, valores)
+    return len(pags)
+
+
+def sincronizar_tudo() -> dict:
+    if not configurado():
+        return {}
+    with _cliente() as c:
+        return {"agendamentos": sincronizar_leads(c), "vendas": sincronizar_vendas(c),
+                "pagamentos": sincronizar_pagamentos(c)}

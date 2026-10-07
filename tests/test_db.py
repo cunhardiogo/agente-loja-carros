@@ -46,3 +46,7 @@ def test_select_all_pagina_ate_esgotar(monkeypatch):
     out = db.select_all("vendas")
     assert len(out) == 1500
     assert chamadas == ["0-999", "1000-1999"]
+
+
+def test_ilike_simples_sem_aspas():
+    assert db.ilike_simples("Onix") == "ilike.*Onix*"

@@ -18,8 +18,14 @@ def _esc(valor) -> str:
 
 
 def ilike(valor: str) -> str:
-    """Valor de filtro `ilike.*termo*` seguro (termo entre aspas, wildcards fora)."""
+    """Valor `ilike.*termo*` para usar DENTRO de or()/and() (termo entre aspas, wildcards fora)."""
     return f'ilike."*{_esc(valor)}*"'
+
+
+def ilike_simples(valor: str) -> str:
+    """Valor `ilike.*termo*` para filtro de coluna simples. Aqui o PostgREST trata aspas como parte do
+    texto (com ilike() nada casava), e vírgula/parênteses não têm efeito — não precisa escapar."""
+    return f"ilike.*{str(valor)}*"
 
 
 def eq_text(valor) -> str:

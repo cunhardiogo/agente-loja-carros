@@ -7,7 +7,8 @@ from datetime import timedelta
 from fastapi import BackgroundTasks, FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from . import confirmacao, consulta, datas, db, evolution, ingest, leads, media, meta_ads, planilha, sheets, supervisor
+from . import (confirmacao, consulta, datas, db, evolution, ingest, leads, media, meta_ads, planilha, sheets,
+               supervisor, vendas_grupo)
 from .config import settings
 
 logging.basicConfig(level=logging.INFO)
@@ -81,13 +82,17 @@ def _tick_inner() -> None:
         leads.checar_prazos()
     except Exception:
         log.exception("erro checando prazos de leads")
-    if leads.sujo["v"] or _time.time() - _ult_controle["t"] > 120:  # lê edições da equipe a cada ~2 min
+    try:
+        vendas_grupo.checar_prazos()
+    except Exception:
+        log.exception("erro checando prazos de vendas")
+    if leads.sujo["v"] or vendas_grupo.sujo["v"] or _time.time() - _ult_controle["t"] > 120:  # edições ~2 min
         _ult_controle["t"] = _time.time()
-        leads.sujo["v"] = False
+        leads.sujo["v"] = vendas_grupo.sujo["v"] = False
         try:
-            sheets.sincronizar_leads()
+            sheets.sincronizar_tudo()
         except Exception:
-            leads.sujo["v"] = True
+            leads.sujo["v"] = vendas_grupo.sujo["v"] = True
             log.exception("erro escrevendo planilha de controle")
     if _time.time() - _ult_planilha["t"] > 600:  # sync da planilha a cada ~10 min
         _ult_planilha["t"] = _time.time()
@@ -335,6 +340,8 @@ def _rotear_evento(body: dict) -> dict:
         grupo = ingest.grupo_por_jid(jid)
         if grupo and grupo.get("tipo") == "agendamentos":
             return leads.processar(data)
+        if grupo and grupo.get("tipo") == "vendas":
+            return vendas_grupo.processar(data, instancia, apikey)
 
     # texto direto OU transcrição de áudio OU leitura de imagem
     texto = media.conteudo_texto(instancia, apikey, data)
@@ -391,6 +398,8 @@ def _ingerir(grupo: dict, message_id: str | None, remetente: str | None,
 def _consulta(pergunta: str, numero: str):
     try:
         resposta = leads.tentar_resolver(pergunta)
+        if resposta is None:
+            resposta = vendas_grupo.tentar_resolver(pergunta)
         if resposta is None:
             resposta = confirmacao.tentar_resolver(pergunta)
         if resposta is None:

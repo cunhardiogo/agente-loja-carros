@@ -12,13 +12,13 @@ from app.config import settings
 GRUPO = "120363418933621858@g.us"
 
 
-def buscar(desde: datetime) -> list[dict]:
+def buscar(desde: datetime, grupo: str = GRUPO) -> list[dict]:
     todas, page = {}, 1
     with httpx.Client(base_url=settings.evolution_url.rstrip("/"), verify=settings.verify_ssl, timeout=120,
                       headers={"apikey": settings.evolution_apikey}) as c:
         while True:
             r = c.post(f"/chat/findMessages/{settings.evolution_instance}",
-                       json={"where": {"key": {"remoteJid": GRUPO}}, "limit": 250, "page": page})
+                       json={"where": {"key": {"remoteJid": grupo}}, "limit": 250, "page": page})
             r.raise_for_status()
             d = r.json()["messages"]
             for m in d["records"]:
