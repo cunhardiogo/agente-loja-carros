@@ -16,6 +16,7 @@ log = logging.getLogger("agente")
 
 CONTEXTO_MIN = 60          # documento sem citação vale para o último carro citado pelo mesmo autor
 VINCULO_ANTES_MIN = 10     # anexo mandado até 10 min ANTES do texto da venda também é dela
+RECEBEDORES_LOJA = ("soberano", "brutus", "grupo sb", "sb veiculos")  # comprovante só conta se a loja recebeu
 RESERVA_DIAS = 2
 CORTE_DIA = 19             # aviso depois disso (ou prazo passando disso) → cobra 9h do dia seguinte
 PRAZO_RESUMO_H = 3
@@ -479,6 +480,9 @@ def _pagamento(info, venda, mid, autor, em, nome, historico) -> dict:
         pago_em = None
     if pago_em and datetime.fromisoformat(pago_em) > em + timedelta(hours=1):
         return {"ignored": "pagamento_futuro"}
+    recebedor = _ascii(info.get("recebedor"))
+    if recebedor and not any(k in recebedor for k in RECEBEDORES_LOJA):
+        return {"ignored": "pagamento_terceiro"}  # dinheiro que não foi para a loja (conta, boleto de terceiro)
     valor = info.get("valor")
     try:
         valor = float(valor) if valor is not None else None

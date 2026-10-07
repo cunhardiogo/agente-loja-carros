@@ -136,3 +136,10 @@ def test_pagamento_repetido_sem_id_nao_duplica(monkeypatch):
     r = vg._pagamento({"valor": 500, "pago_em": "2026-10-07T08:07:07"}, None, "m1", "a", datetime.now(timezone.utc),
                       "comprovante.pdf", False)
     assert r == {"ignored": "pagamento_repetido"}
+
+
+def test_pagamento_para_terceiro_nao_conta(monkeypatch):
+    monkeypatch.setattr(vg.db, "select", lambda t, p=None: [])
+    r = vg._pagamento({"valor": 349.96, "pago_em": "2026-10-06T10:00:00", "recebedor": "Claro S/A"}, None, "m2", "a",
+                      datetime(2026, 10, 7, 12, tzinfo=timezone.utc), None, False)
+    assert r == {"ignored": "pagamento_terceiro"}
