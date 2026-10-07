@@ -13,6 +13,8 @@ from .config import settings
 log = logging.getLogger("agente")
 
 ABA_AGENDAMENTOS = "Agendamentos"
+# a planilha começa em outubro/2026: leads com agendamento antes disso ficam só no banco
+DESDE = "2026-10-01"
 _API = "https://sheets.googleapis.com/v4/spreadsheets"
 _SCOPE = "https://www.googleapis.com/auth/spreadsheets"
 
@@ -87,10 +89,12 @@ def _garantir_aba(c: httpx.Client, aba: str) -> None:
 
 
 def sincronizar_leads() -> int:
-    """Reescreve a aba Agendamentos com todos os leads (não removidos), do mais novo pro mais antigo."""
+    """Reescreve a aba Agendamentos com os leads (não removidos) agendados a partir de DESDE,
+    do mais novo pro mais antigo."""
     if not configurado():
         return 0
-    rows = db.select_all("leads", {"select": "*", "removido": "eq.false", "order": "recebido_em.desc"})
+    rows = db.select_all("leads", {"select": "*", "removido": "eq.false", "order": "recebido_em.desc",
+                                   "data_agendada": f"gte.{DESDE}"})
     valores = linhas_leads(rows)
     with httpx.Client(base_url=_API, headers={"Authorization": f"Bearer {_token()}"},
                       verify=settings.verify_ssl, timeout=60) as c:
