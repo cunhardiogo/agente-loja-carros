@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     agendamento_via_grupo: bool = False
     # id da planilha de agendamentos — sem default; configurar no ambiente
     planilha_sheet_id: str = ""
+    # planilha de controle (Google Sheets) escrita por conta de serviço — JSON cru ou base64
+    google_sa_json: str = ""
+    controle_sheet_id: str = ""
 
 
 settings = Settings()

@@ -711,7 +711,89 @@ def mensagem_cobranca(cliente: str | None = None, veiculo: str | None = None) ->
             "mensagem": msg}
 
 
+# ===== leads do grupo de agendamento =====
+_ABERTOS = ("aguardando_retorno", "retorno", "confirmado", "negociando", "remarcado", "compareceu", "reservado")
+
+
+def _lead_curto(l: dict) -> dict:
+    from .leads import STATUS_LABEL, TIPO_LABEL, codigo
+    return {"codigo": codigo(l), "cliente": l.get("cliente_nome"), "telefone": l.get("telefone"),
+            "veiculo": l.get("veiculo"), "vendedor": l.get("vendedor_nome"), "sdr": l.get("sdr"),
+            "tipo": TIPO_LABEL.get(l["tipo"], l["tipo"]), "canal": l.get("canal"),
+            "data": l.get("data_agendada"), "horario": l.get("horario"),
+            "status": STATUS_LABEL.get(l["status"], l["status"]), "nova_data": l.get("nova_data"),
+            "recebido_em": _fmt_local(l.get("recebido_em")),
+            "ultimo_retorno": l.get("ultimo_retorno_texto"), "troca": l.get("troca"),
+            "oferta_entrada": l.get("oferta_entrada"), "observacao": l.get("observacao"),
+            "cobranca": l.get("cobranca_status")}
+
+
+def leads_abertos(vendedor: str | None = None, sdr: str | None = None) -> dict:
+    rows = db.select_all("leads", {"select": "*", "removido": "eq.false",
+                                   "status": f"in.({','.join(_ABERTOS)})", "order": "recebido_em.desc"})
+    if vendedor:
+        rows = [r for r in rows if _sem_acento(vendedor) in _sem_acento(r.get("vendedor_nome"))]
+    if sdr:
+        rows = [r for r in rows if _sem_acento(sdr) in _sem_acento(r.get("sdr"))]
+    return {"total": len(rows), "leads": [_lead_curto(r) for r in rows[:40]]}
+
+
+def buscar_lead(termo: str) -> dict:
+    t = db.ilike(termo)
+    rows = db.select("leads", {"select": "*", "removido": "eq.false", "order": "recebido_em.desc", "limit": "15",
+                               "or": f"(cliente_nome.{t},veiculo.{t},telefone.{t})"})
+    out = []
+    for r in rows:
+        d = _lead_curto(r)
+        d["respostas"] = [f"{e.get('autor')}: {e.get('texto')}" for e in
+                          db.select("lead_eventos", {"lead_id": f"eq.{r['id']}", "order": "em.asc"})]
+        out.append(d)
+    return {"encontrados": len(out), "leads": out}
+
+
+def resumo_leads(periodo: str = "mes", data_inicio: str | None = None, data_fim: str | None = None) -> dict:
+    from collections import Counter
+    from .leads import STATUS_LABEL, TIPO_LABEL
+    ini, fim = _resolve(periodo, data_inicio, data_fim)
+    params = {"select": "*", "removido": "eq.false"}
+    rows = db.select_all("leads", params)
+    rows = [r for r in rows if _dentro(_fmt_data_sp(r["recebido_em"]), ini, fim)]
+    tempos = []
+    for r in rows:
+        if r.get("ultimo_retorno_em"):
+            ev = db.select("lead_eventos", {"select": "em", "lead_id": f"eq.{r['id']}", "order": "em.asc", "limit": "1"})
+            if ev:
+                tempos.append((datetime.fromisoformat(ev[0]["em"]) - datetime.fromisoformat(r["recebido_em"])).total_seconds() / 60)
+    tempos.sort()
+    vendidos = [r for r in rows if r["status"] == "vendido"]
+    return {
+        "periodo": [ini, fim], "total": len(rows),
+        "por_tipo": dict(Counter(TIPO_LABEL.get(r["tipo"], r["tipo"]) for r in rows)),
+        "por_sdr": dict(Counter(r.get("sdr") or "?" for r in rows)),
+        "por_canal": dict(Counter((r.get("canal") or "?").strip().title() for r in rows)),
+        "por_vendedor": dict(Counter(r.get("vendedor_nome") or "?" for r in rows)),
+        "por_status": dict(Counter(STATUS_LABEL.get(r["status"], r["status"]) for r in rows)),
+        "vendidos": len(vendidos),
+        "vendidos_por_vendedor": dict(Counter(r.get("vendedor_nome") or "?" for r in vendidos)),
+        "sem_retorno": sum(1 for r in rows if not r.get("ultimo_retorno_em")),
+        "tempo_retorno_mediano_min": round(tempos[len(tempos) // 2]) if tempos else None,
+        "cobrancas_enviadas": sum(1 for r in rows if r.get("cobranca_status") == "enviada"),
+    }
+
+
+def _sem_acento(s: str | None) -> str:
+    import unicodedata
+    return unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode().lower()
+
+
+def _fmt_data_sp(iso: str) -> str:
+    return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(datas.TZ).date().isoformat()
+
+
 DISPATCH = {
+    "leads_abertos": leads_abertos,
+    "buscar_lead": buscar_lead,
+    "resumo_leads": resumo_leads,
     "lista_ligar_hoje": lista_ligar_hoje,
     "mensagem_cobranca": mensagem_cobranca,
     "giro_estoque": giro_estoque,
@@ -755,6 +837,23 @@ _DI = {"type": "string", "description": "Data início ISO YYYY-MM-DD (opcional, 
 _DF = {"type": "string", "description": "Data fim ISO YYYY-MM-DD (opcional)"}
 
 TOOLS = [
+    {"type": "function", "function": {
+        "name": "leads_abertos",
+        "description": "Leads do grupo de agendamento ainda sem desfecho (aguardando retorno, confirmado, negociando, remarcado...). Filtra por vendedor ou SDR.",
+        "parameters": {"type": "object", "properties": {
+            "vendedor": {"type": "string", "description": "Nome do vendedor (opcional)"},
+            "sdr": {"type": "string", "description": "Nome da SDR/atendente (opcional)"}}},
+    }},
+    {"type": "function", "function": {
+        "name": "buscar_lead",
+        "description": "Procura um lead do grupo de agendamento por nome do cliente, carro ou telefone e mostra tudo dele (observação, troca, oferta, respostas do vendedor).",
+        "parameters": {"type": "object", "properties": {"termo": {"type": "string"}}, "required": ["termo"]},
+    }},
+    {"type": "function", "function": {
+        "name": "resumo_leads",
+        "description": "Números do grupo de agendamento num período: total, por tipo/SDR/canal/vendedor/status, vendidos, sem retorno, tempo de retorno, cobranças.",
+        "parameters": {"type": "object", "properties": {"periodo": _PERIODO, "data_inicio": _DI, "data_fim": _DF}},
+    }},
     {"type": "function", "function": {
         "name": "listar_pendencias",
         "description": "Lista os eventos aguardando confirmação (fila de pendências), com o código de cada um.",
@@ -986,7 +1085,7 @@ e atualizar_carro (preço/status/cor/km do estoque). Confirme em 1 linha o que m
 LEMBRETES: criar_lembrete quando o dono pedir p/ ser lembrado (calcule 'quando' em ISO a partir da DATA DE HOJE); listar_lembretes p/ ver os pendentes.
 SUPERVISOR: você é proativo. radar mostra os alertas abertos (carro encalhado, a receber parado, entrega atrasada, comparecimento baixo, sistema fora) — use quando perguntarem 'o que preciso resolver?'/'como está a operação?', e resolver_alerta p/ baixar um. anotar salva recado livre sem horário; listar_notas/resolver_nota gerenciam. pendências (listar_pendencias) mostra o que aguarda sua confirmação.
 SECRETÁRIA (assistido — você organiza, o DONO contata): lista_ligar_hoje dá quem ligar hoje (faltas de ontem, reservas paradas, entrega atrasada, a receber) com telefone — use em 'quem preciso contatar?'/'tem alguém pra ligar?'. mensagem_cobranca monta um texto pronto e educado de cobrança pra um cliente com saldo (ex 'manda uma cobrança pro João'); ENTREGUE o texto pro dono copiar/encaminhar e deixe claro que ele revisa e envia — você NUNCA manda direto pro cliente.
-OBS: agendamento, comparecimento, vendido e reservado vêm da PLANILHA — não dá pra editar por aqui; nesse caso oriente a corrigir na planilha.
+LEADS (grupo Agendamento SDR — fonte oficial de visitas e negociações por telefone): use leads_abertos, buscar_lead e resumo_leads para qualquer pergunta sobre agendamentos, leads, SDRs, retorno de vendedor e cobranças. Tipos: Visita (horário na loja), Negociação telefone, Turno (horário e vendedor definidos).
 
 ESTILO: curto e direto, em português, valores como R$ 95.000, listas em linhas curtas com emojis discretos. \
 Quando fizer sentido, acrescente UM insight curto (ex.: quem está puxando o mês, alerta de comparecimento/entrega atrasada) — sem encher. \

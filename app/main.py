@@ -7,7 +7,7 @@ from datetime import timedelta
 from fastapi import BackgroundTasks, FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from . import confirmacao, consulta, datas, db, evolution, ingest, media, meta_ads, planilha, supervisor
+from . import confirmacao, consulta, datas, db, evolution, ingest, leads, media, meta_ads, planilha, sheets, supervisor
 from .config import settings
 
 logging.basicConfig(level=logging.INFO)
@@ -46,6 +46,7 @@ import threading
 import time as _time
 _ult_lembrete = {"t": 0.0}
 _ult_planilha = {"t": 0.0}
+_ult_controle = {"t": 0.0}
 _lojasb_ok = {"v": True}
 _tick_lock = threading.Lock()
 
@@ -69,6 +70,18 @@ def _tick_inner() -> None:
     _radar()
     _checar_lojasb()
     _checar_relatorios()
+    try:
+        leads.checar_prazos()
+    except Exception:
+        log.exception("erro checando prazos de leads")
+    if leads.sujo["v"] or _time.time() - _ult_controle["t"] > 600:
+        _ult_controle["t"] = _time.time()
+        leads.sujo["v"] = False
+        try:
+            sheets.sincronizar_leads()
+        except Exception:
+            leads.sujo["v"] = True
+            log.exception("erro escrevendo planilha de controle")
     if _time.time() - _ult_planilha["t"] > 600:  # sync da planilha a cada ~10 min
         _ult_planilha["t"] = _time.time()
         try:
@@ -107,14 +120,14 @@ def _checar_lojasb() -> None:
     if _lojasb_ok["v"] and not ok:  # caiu
         for n in evolution.numeros_alerta():
             try:
-                evolution.enviar_por_coletor(n, "🚨 ALERTA: o agente (lojasb) DESCONECTOU do WhatsApp. "
+                evolution.enviar_por_coletor(n, f"🚨 ALERTA: o agente ({settings.evolution_assist_instance}) DESCONECTOU do WhatsApp. "
                                              "Reconecte em evo.agenteintel.com.br/manager — sem isso ele não envia relatórios nem lembretes.")
             except Exception:
                 log.exception("erro alertando queda lojasb")
     elif ok and not _lojasb_ok["v"]:  # voltou
         for n in evolution.numeros_alerta():
             try:
-                evolution.enviar_por_coletor(n, "✅ Agente (lojasb) reconectado. Tudo normal.")
+                evolution.enviar_por_coletor(n, f"✅ Agente ({settings.evolution_assist_instance}) reconectado. Tudo normal.")
             except Exception:
                 pass
     _lojasb_ok["v"] = ok
@@ -303,6 +316,12 @@ def _rotear_evento(body: dict) -> dict:
     eh_assistente = bool(settings.evolution_assist_instance) and instancia == settings.evolution_assist_instance
     apikey = settings.evolution_assist_apikey if eh_assistente else settings.evolution_apikey
 
+    # grupo de agendamento: formulário/resposta/nota viram lead (sem IA de extração nem mídia)
+    if jid.endswith("@g.us") and not eh_assistente:
+        grupo = ingest.grupo_por_jid(jid)
+        if grupo and grupo.get("tipo") == "agendamentos":
+            return leads.processar(data)
+
     # texto direto OU transcrição de áudio OU leitura de imagem
     texto = media.conteudo_texto(instancia, apikey, data)
     if not texto:
@@ -357,7 +376,9 @@ def _ingerir(grupo: dict, message_id: str | None, remetente: str | None,
 
 def _consulta(pergunta: str, numero: str):
     try:
-        resposta = confirmacao.tentar_resolver(pergunta)
+        resposta = leads.tentar_resolver(pergunta)
+        if resposta is None:
+            resposta = confirmacao.tentar_resolver(pergunta)
         if resposta is None:
             historico = consulta.carregar_historico(numero)
             resposta = consulta.responder(pergunta, historico, numero)

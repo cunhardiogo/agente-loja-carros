@@ -105,3 +105,20 @@ def ler_imagem(image_b64: str, mimetype: str | None) -> str:
         temperature=0,
     )
     return (resp.choices[0].message.content or "").strip()
+
+
+NOTA_LEAD_SYSTEM = """Você lê a observação que o SDR escreve sobre um lead de loja de carros.
+Responda SOMENTE um JSON com:
+- "troca": o carro que o cliente quer dar na troca (modelo/ano/km como escrito), ou null
+- "oferta_entrada": oferta de valor, entrada ou condição de pagamento citada (ex "ofereceu 100 mil à vista", "8 mil de entrada", "sem entrada, score bom"), ou null"""
+
+
+def extrair_nota_lead(observacao: str) -> dict:
+    if _client is None:
+        return {}
+    import json
+    resp = _client.chat.completions.create(
+        model=settings.openai_model_extracao, temperature=0, response_format={"type": "json_object"},
+        messages=[{"role": "system", "content": NOTA_LEAD_SYSTEM}, {"role": "user", "content": observacao}])
+    d = json.loads(resp.choices[0].message.content or "{}")
+    return {k: (str(d[k])[:300] if d.get(k) else None) for k in ("troca", "oferta_entrada")}
