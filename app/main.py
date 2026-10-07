@@ -232,6 +232,9 @@ def _jobs_relatorio(dow: int, hhmm: str) -> list:
             if dow in dias and ini <= hhmm <= fim]
 
 
+_SO_DONO = {"agenda"}  # relatórios que vão só pro MEU_NUMERO (os demais vão pra todos os destinatários)
+
+
 def _checar_relatorios() -> None:
     """Dispara os relatórios na janela certa (independente do GitHub Actions)."""
     now = datas.agora()
@@ -265,7 +268,10 @@ def _checar_relatorios() -> None:
                         texto += f"\n\n🧠 *Leitura da semana:*\n{ins}"
             except Exception:
                 log.exception("erro anexando insight")
-            evolution.enviar_relatorio(texto)
+            if tipo in _SO_DONO:
+                evolution.enviar_texto(settings.meu_numero, texto)
+            else:
+                evolution.enviar_relatorio(texto)
         except Exception:
             log.exception("erro enviando relatório %s", tipo)
             db.delete("relatorios_enviados", {"tipo": f"eq.{tipo}", "data": f"eq.{hoje}"})  # libera p/ retry
