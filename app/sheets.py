@@ -1,5 +1,6 @@
 """Planilha de controle (Google Sheets) — espelho dos leads do grupo de agendamento.
-Escrita por conta de serviço (GOOGLE_SA_JSON) na planilha CONTROLE_SHEET_ID."""
+Escrita na planilha CONTROLE_SHEET_ID por conta de serviço (GOOGLE_SA_JSON) ou por
+cliente OAuth com refresh token (GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN)."""
 import base64
 import json
 import logging
@@ -21,10 +22,15 @@ CABECALHO = ["Recebido em", "SDR", "Tipo", "Cliente", "Telefone", "Data", "Horá
 
 
 def configurado() -> bool:
-    return bool(settings.google_sa_json and settings.controle_sheet_id)
+    return bool(settings.controle_sheet_id and (settings.google_sa_json or settings.google_refresh_token))
 
 
 def _credenciais():
+    if settings.google_refresh_token:
+        from google.oauth2.credentials import Credentials
+        return Credentials(None, refresh_token=settings.google_refresh_token,
+                           client_id=settings.google_client_id, client_secret=settings.google_client_secret,
+                           token_uri="https://oauth2.googleapis.com/token", scopes=[_SCOPE])
     from google.oauth2 import service_account
     bruto = settings.google_sa_json.strip()
     if not bruto.startswith("{"):
@@ -33,9 +39,12 @@ def _credenciais():
 
 
 def _token() -> str:
+    import requests
     from google.auth.transport.requests import Request
+    sessao = requests.Session()
+    sessao.verify = settings.verify_ssl
     cred = _credenciais()
-    cred.refresh(Request())
+    cred.refresh(Request(session=sessao))
     return cred.token
 
 
