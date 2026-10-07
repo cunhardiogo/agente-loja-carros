@@ -364,42 +364,10 @@ def checar_prazos(agora: datetime | None = None) -> int:
     return n
 
 
-_AFIRMA = {"ok", "sim", "s", "envia", "enviar", "manda", "mandar", "pode", "pode enviar", "pode mandar",
-           "aprovado", "aprovo", "aprova", "beleza", "blz", ""}
-_NEGA = {"nao", "n", "descarta", "descartar", "cancela", "cancelar", "nao envia", "nao manda", "deixa"}
-
-
 def tentar_resolver(texto: str) -> str | None:
-    """Aprovação de cobrança pelo dono. None = não é comando de cobrança."""
-    pend = db.select("leads", {"select": "*", "cobranca_status": "eq.proposta"})
-    if not pend:
-        return None
-    bruto = texto.strip()
-    m = re.search(r"#?\b([0-9a-fA-F]{4})\b", bruto)
-    alvo = None
-    if m:
-        alvo = next((l for l in pend if codigo(l) == m.group(1).upper()), None)
-        if not alvo:
-            return None  # código de outra pendência (confirmação de evento)
-        resto = (bruto[:m.start()] + bruto[m.end():]).strip(" :#-–")
-    else:
-        from . import confirmacao
-        if len(pend) != 1 or confirmacao.pendentes_itens():
-            return None
-        alvo, resto = pend[0], bruto
-    r = _ascii(resto).strip(" .!")
-    if r in _NEGA:
-        db.update("leads", {"cobranca_status": "descartada"}, {"id": f"eq.{alvo['id']}"})
-        sujo["v"] = True
-        return f"Ok, cobrança do lead {alvo.get('cliente_nome')} descartada."
-    if r in _AFIRMA:
-        msg = alvo["cobranca_texto"]
-    elif m and len(resto) >= 15:
-        msg = resto
-    else:
-        return None
-    return _enviar_cobranca(alvo, msg)
-
+    """Aprovação de cobrança pelo dono (leads e vendas juntos) — ver cobrancas.py."""
+    from . import cobrancas
+    return cobrancas.tentar_resolver(texto)
 
 def _enviar_cobranca(lead: dict, msg: str) -> str:
     atual = db.select("leads", {"id": f"eq.{lead['id']}", "limit": "1"})[0]

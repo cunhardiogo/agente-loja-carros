@@ -180,3 +180,23 @@ def test_importar_edicoes_edita_inclui_e_remove(monkeypatch):
     assert ("eq.11111111-aaaa", ) == (updates[0][0],) and updates[0][1]["status"] == "vendido"
     assert inserts[0]["cliente_nome"] == "Carla" and inserts[0]["data_agendada"] == "2026-10-10"
     assert updates[-1] == ("eq.22222222-bbbb", {"removido": True})
+
+
+def test_texto_novo_sem_codigo_e_pode_enviar(monkeypatch):
+    lead = _lead(cobranca_status="proposta")
+    enviados, _ = _setup_aprovacao(monkeypatch, lead)
+    from app import ingest
+    monkeypatch.setattr(ingest, "PERGUNTAR_DONO", False)
+    r = leads.tentar_resolver("Texto novo.\nYan, o cara sentou na avaliação que você passou do Fit?")
+    assert "enviada" in r and enviados[-1][1] == "Yan, o cara sentou na avaliação que você passou do Fit?"
+    leads.tentar_resolver("Pode enviar")
+    assert enviados[-1][1] == "texto padrão da cobrança"
+    assert leads.tentar_resolver("Esse lead é de negociação ou visita?") is None
+
+
+def test_duas_cobrancas_sem_codigo_pede_codigo(monkeypatch):
+    from app import cobrancas
+    a, b = _lead(cobranca_status="proposta"), _lead(id="cafe0000-1", cobranca_status="proposta")
+    monkeypatch.setattr(cobrancas.db, "select", lambda t, p=None: [a, b] if t == "leads" else [])
+    r = cobrancas.tentar_resolver("pode enviar")
+    assert "#ABCD" in r and "#CAFE" in r and "código" in r

@@ -7,7 +7,7 @@ from datetime import timedelta
 from fastapi import BackgroundTasks, FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from . import (confirmacao, consulta, datas, db, evolution, ingest, leads, media, meta_ads, planilha, sheets,
+from . import (cobrancas, confirmacao, consulta, datas, db, evolution, ingest, leads, media, meta_ads, planilha, sheets,
                supervisor, vendas_grupo)
 from .config import settings
 
@@ -397,9 +397,7 @@ def _ingerir(grupo: dict, message_id: str | None, remetente: str | None,
 
 def _consulta(pergunta: str, numero: str):
     try:
-        resposta = leads.tentar_resolver(pergunta)
-        if resposta is None:
-            resposta = vendas_grupo.tentar_resolver(pergunta)
+        resposta = cobrancas.tentar_resolver(pergunta)
         if resposta is None:
             resposta = confirmacao.tentar_resolver(pergunta)
         if resposta is None:

@@ -607,40 +607,10 @@ def checar_prazos(agora: datetime | None = None) -> int:
     return n
 
 
-_AFIRMA = {"ok", "sim", "s", "envia", "enviar", "manda", "mandar", "pode", "pode enviar", "pode mandar",
-           "aprovado", "aprovo", "aprova", "beleza", "blz", ""}
-_NEGA = {"nao", "n", "descarta", "descartar", "cancela", "cancelar", "nao envia", "nao manda", "deixa"}
-
-
 def tentar_resolver(texto: str) -> str | None:
-    """Aprovação de cobrança de venda pelo dono. None = não é comando de cobrança de venda."""
-    pend = db.select("vendas", {"select": "*", "cobranca_status": "eq.proposta"})
-    if not pend:
-        return None
-    bruto = texto.strip()
-    m = re.search(r"#?\b([0-9a-fA-F]{4})\b", bruto)
-    if m:
-        alvo = next((v for v in pend if codigo(v) == m.group(1).upper()), None)
-        if not alvo:
-            return None
-        resto = (bruto[:m.start()] + bruto[m.end():]).strip(" :#-–")
-    else:
-        from . import confirmacao
-        abertos = db.select("leads", {"select": "id", "cobranca_status": "eq.proposta", "limit": "1"})
-        if len(pend) != 1 or abertos or confirmacao.pendentes_itens():
-            return None
-        alvo, resto = pend[0], bruto
-    r = _ascii(resto).strip(" .!")
-    if r in _NEGA:
-        db.update("vendas", {"cobranca_status": "descartada"}, {"id": f"eq.{alvo['id']}"})
-        return f"Ok, cobrança do {_carro(alvo)} descartada."
-    if r in _AFIRMA:
-        msg = alvo["cobranca_texto"]
-    elif m and len(resto) >= 15:
-        msg = resto
-    else:
-        return None
-    return _enviar(alvo, msg)
+    """Aprovação de cobrança pelo dono (leads e vendas juntos) — ver cobrancas.py."""
+    from . import cobrancas
+    return cobrancas.tentar_resolver(texto)
 
 
 def _resolvida(atual: dict) -> bool:
@@ -648,7 +618,6 @@ def _resolvida(atual: dict) -> bool:
     return (motivo == "resumo" and atual["status_venda"] != "aguardando_resumo") or \
         (motivo == "pendencias" and not atual.get("pendencias")) or \
         (motivo == "reserva" and atual["status_venda"] != "reservado")
-
 
 def _enviar(venda: dict, msg: str) -> str:
     atual = db.select("vendas", {"select": "*", "id": f"eq.{venda['id']}", "limit": "1"})[0]
