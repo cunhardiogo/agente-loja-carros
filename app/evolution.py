@@ -69,6 +69,24 @@ def enviar_por_coletor(numero: str, texto: str) -> dict:
     return _send(settings.evolution_instance, settings.evolution_apikey, numero, texto)
 
 
+def descricao_grupo(jid: str) -> str:
+    """Descrição atual do grupo, lida pelo coletor."""
+    with httpx.Client(base_url=_base, headers={"apikey": settings.evolution_apikey},
+                      verify=settings.verify_ssl, timeout=30) as c:
+        r = c.get(f"/group/findGroupInfos/{settings.evolution_instance}", params={"groupJid": jid})
+        r.raise_for_status()
+        return r.json().get("desc") or ""
+
+
+def alterar_descricao_grupo(jid: str, texto: str) -> None:
+    """Troca a descrição do grupo pelo coletor (o número do dono é admin)."""
+    with httpx.Client(base_url=_base, headers={"apikey": settings.evolution_apikey, "Content-Type": "application/json"},
+                      verify=settings.verify_ssl, timeout=30) as c:
+        r = c.post(f"/group/updateGroupDescription/{settings.evolution_instance}", params={"groupJid": jid},
+                   json={"description": texto})
+        r.raise_for_status()
+
+
 def numeros_alerta() -> list[str]:
     return [n.strip() for n in (settings.numeros_relatorio or "").split(",") if n.strip()]
 

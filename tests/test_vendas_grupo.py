@@ -143,3 +143,31 @@ def test_pagamento_para_terceiro_nao_conta(monkeypatch):
     r = vg._pagamento({"valor": 349.96, "pago_em": "2026-10-06T10:00:00", "recebedor": "Claro S/A"}, None, "m2", "a",
                       datetime(2026, 10, 7, 12, tzinfo=timezone.utc), None, False)
     assert r == {"ignored": "pagamento_terceiro"}
+
+
+def test_queda_e_ranking(monkeypatch):
+    assert vg.classificar_aviso("A venda do Fastback caiu") == "queda"
+    assert vg.classificar_aviso("Cliente do Kwid desistiu") == "queda"
+    rows = [{"modelo": "FIAT", "versao": "Fastback", "ano": 2026, "placa": "TTD9E46", "vendedor_id": "c", "data_venda": "2026-10-06"},
+            {"modelo": "FIT", "versao": "LX", "ano": 2018, "placa": "LUH6H38", "vendedor_id": "v", "data_venda": "2026-10-06"},
+            {"modelo": "Mt03", "versao": "MT03", "ano": 2020, "placa": "RJR0E26", "vendedor_id": "v", "data_venda": "2026-10-06"},
+            {"modelo": "Fiat toro", "versao": "ultra", "ano": 2021, "placa": "RJI2F10", "vendedor_id": "e", "data_venda": "2026-10-06"}]
+    monkeypatch.setattr(vg.db, "select", lambda t, p=None: [{"id": "c", "nome": "Carlos"}, {"id": "v", "nome": "Vinicius"},
+                                                            {"id": "e", "nome": "Edson"}])
+    monkeypatch.setattr(vg.db, "select_all", lambda t, p=None: rows)
+    txt = vg.texto_ranking("2026-10")
+    assert txt.startswith("💰*TOTAL DE VENDAS GRUPO SB: 4*")
+    assert "*🥇Vinicius: 2*\nFIT 2018 - LUH6H38\nMt03 2020 - RJR0E26" in txt
+    assert "*🥈Carlos: 1*\nFastback 2026 - TTD9E46" in txt and "*🥈Edson: 1*" in txt
+
+
+def test_valor_formatos_br_e_americano():
+    casos = {"R$69.900,00": 69900, "R$136.900": 136900, "50.000,00.": 50000, "R$65,159.30": 65159.30,
+             "R$2.625,16": 2625.16, "13000": 13000, "100.000 Pix 19.90": 100000, "R$": None}
+    for txt, esperado in casos.items():
+        assert vg._valor(txt) == esperado, txt
+
+
+def test_troca_maior_que_total_vira_pendencia():
+    f = vg.campos_venda(vg.parse_resumo(RESUMO.replace("🚘 Valor troca:", "🚘 Valor troca: R$520.000")), date(2026, 10, 7))
+    assert "valor da troca (maior que o total)" in vg.pendencias_venda({**f, "vendedor_id": "v1"})

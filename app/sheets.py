@@ -5,6 +5,7 @@ cliente OAuth com refresh token (GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN)."""
 import base64
 import json
 import logging
+import re
 
 import httpx
 
@@ -295,7 +296,7 @@ def _converter_venda(col: str, valor: str) -> dict:
     if col == "Status":
         rev = {_ascii(lbl): k for k, lbl in STATUS_LABEL.items()}
         a = _ascii(v)
-        return {"status_venda": rev.get(a) or ("reservado" if "reserv" in a else "desistiu" if "desist" in a
+        return {"status_venda": rev.get(a) or ("reservado" if "reserv" in a else "desistiu" if re.search(r"desist|caiu|cancel", a)
                                                else "aguardando_resumo" if "aguard" in a else "completa")}
     if col == "Ano":
         return {"ano": int(v) if v.isdigit() else None}

@@ -23,7 +23,7 @@ PRAZO_RESUMO_H = 3
 CARENCIA_PENDENCIA_MIN = 15
 
 STATUS_LABEL = {"aguardando_resumo": "Aguardando resumo", "completa": "Completa",
-                "reservado": "Reservado", "desistiu": "Desistiu"}
+                "reservado": "Reservado", "desistiu": "Caiu"}
 OPCIONAIS = {"retorno", "over", "desconto", "troca_carro", "troca_placa", "troca_valor", "obs"}
 CAMPO_LABEL = {
     "data_venda": "data da venda", "data_entrega": "data da entrega", "vendedor": "vendedor",
@@ -59,11 +59,15 @@ def eh_resumo(texto: str) -> bool:
 
 
 def _valor(txt: str | None) -> float | None:
-    m = re.search(r"\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:,\d{1,2})?", (txt or "").replace(" ", ""))
+    """'R$69.900,00', 'R$136.900', '50.000,00.' e também o formato americano 'R$65,159.30'.
+    O último separador seguido de exatamente 2 dígitos é o decimal; os demais são milhar."""
+    m = re.search(r"\d[\d.,]*", (txt or "").replace(" ", ""))
     if not m:
         return None
+    s = m.group().rstrip(".,")
+    inteiro, frac = (s[:-3], s[-2:]) if re.search(r"[.,]\d{2}$", s) else (s, "0")
     try:
-        return float(m.group().replace(".", "").replace(",", "."))
+        return float(re.sub(r"[.,]", "", inteiro) + "." + frac)
     except ValueError:
         return None
 
@@ -125,7 +129,11 @@ def pendencias_venda(v: dict) -> list[str]:
         "tel": bool(v.get("cliente_telefone")), "endereco": bool(v.get("cliente_endereco")),
         "cep": bool(v.get("cliente_cep")), "portal": bool(v.get("portal_venda")),
     }
-    return [CAMPO_LABEL[k] for k in CAMPO_LABEL if not ok[k]]
+    falta = [CAMPO_LABEL[k] for k in CAMPO_LABEL if not ok[k]]
+    total = v.get("valor_total") or v.get("valor_venda")
+    if v.get("troca_valor") and total and v["troca_valor"] > total:
+        falta.append("valor da troca (maior que o total)")
+    return falta
 
 
 def campos_venda(c: dict, ref) -> dict:
@@ -163,6 +171,8 @@ def classificar_aviso(texto: str) -> str | None:
     a = _ascii(texto).strip()
     if not a or len(a) > 120 or eh_resumo(texto) or "?" in a:
         return None
+    if re.search(r"\b(caiu|cancelad[oa]|desisti[ru]|desistencia|nao vai mais levar)\b", a):
+        return "queda"
     if re.search(r"\breservad[oa]s?\b", a):
         return "reserva"
     if re.search(r"\b(vendid[oa]|vendeu)\b", a) or re.match(r"^venda\b", a):
@@ -271,7 +281,29 @@ def _venda_aberta_do_vendedor(vendedor_id: str | None, modelo: str | None) -> di
     return sem_carro[0] if sem_carro else None
 
 
+def _queda(texto, autor, em) -> dict:
+    """'A venda do Fastback caiu' → a venda sai da contagem (status desistiu)."""
+    alvo = _venda_por_placa(placa_norm(texto))
+    if not alvo:
+        toks = [t for t in _ascii(_modelo_do_aviso(texto)).split() if len(t) >= 3
+                and t not in ("caiu", "cancelada", "cancelado", "desistiu", "desistir", "cliente", "venda")]
+        rows = db.select("vendas", {"select": "*", "removido": "eq.false",
+                                    "status_venda": "in.(aguardando_resumo,completa,reservado)",
+                                    "order": "created_at.desc", "limit": "60"})
+        cands = [v for v in rows if toks and any(t in _ascii(f"{v.get('modelo')} {v.get('versao')}") for t in toks)]
+        alvo = cands[0] if len(cands) == 1 else None
+    if not alvo:
+        return {"ignored": "queda_sem_venda"}
+    obs = "\n".join(x for x in (alvo.get("observacoes"), f"[{_hhmm(em)}] {texto}") if x)
+    db.update("vendas", {"status_venda": "desistiu", "observacoes": obs, "contexto_em": _iso(em),
+                         "contexto_autor": autor}, {"id": f"eq.{alvo['id']}"})
+    sujo["v"] = True
+    return {"queda": alvo["id"]}
+
+
 def _aviso(tipo, texto, mid, autor, em, historico) -> dict:
+    if tipo == "queda":
+        return _queda(texto, autor, em)
     vends = _vendedores()
     vend = vendedor_por_nome(texto, vends) or vendedor_por_lid(autor, vends)
     placa = placa_norm(texto)
@@ -634,3 +666,63 @@ def _enviar(venda: dict, msg: str) -> str:
                          "cobranca_enviada_em": _iso(datetime.now(timezone.utc))}, {"id": f"eq.{venda['id']}"})
     sujo["v"] = True
     return f"✅ Cobrança enviada pro {v[0]['nome']}."
+
+
+# ===== ranking do mês na descrição do grupo =====
+GRUPO_VENDAS = "120363394210533119@g.us"
+_MARCAS = {"fiat", "renault", "peugeot", "chevrolet", "gm", "volkswagen", "vw", "ford", "honda", "toyota", "hyundai",
+           "nissan", "jeep", "citroen", "mitsubishi", "byd", "kia", "bmw", "mini", "audi", "yamaha", "suzuki", "caoa"}
+_MEDALHAS = ["🥇", "🥈", "🥉"]
+_descricao = {"aplicada": None, "t": 0.0}
+DESCRICAO_ATIVA = False  # liga quando o dono confirmar o formato (vendas de revenda, vendedor)
+
+
+def nome_carro(v: dict) -> str:
+    modelo = (v.get("modelo") or "").strip()
+    versao = (v.get("versao") or "").strip()
+    if _ascii(modelo) in _MARCAS and versao:  # "FIAT / Fastback" → "Fastback"
+        modelo = versao
+    return modelo or versao or "Carro"
+
+
+def texto_ranking(mes: str | None = None) -> str:
+    """Descrição do grupo VENDAS: total do mês e vendas por vendedor (empate divide a medalha)."""
+    mes = mes or datas.hoje_iso()[:7]
+    nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
+    rows = db.select_all("vendas", {"select": "modelo,versao,ano,placa,vendedor_id,data_venda", "removido": "eq.false",
+                                    "status_venda": "in.(completa,aguardando_resumo)",
+                                    "data_venda": f"gte.{mes}-01", "order": "data_venda.asc,created_at.asc"})
+    rows = [r for r in rows if (r.get("data_venda") or "")[:7] == mes]
+    por: dict[str, list] = {}
+    for r in rows:
+        por.setdefault(nomes.get(r.get("vendedor_id"), "Sem vendedor"), []).append(r)
+    ordem = sorted(por.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+    qtds = sorted({len(v) for v in por.values()}, reverse=True)
+    linhas = [f"💰*TOTAL DE VENDAS GRUPO SB: {len(rows)}*"]
+    for nome, vs in ordem:
+        pos = qtds.index(len(vs))
+        medalha = _MEDALHAS[pos] if pos < 3 else "🏅"
+        linhas.append(f"\n*{medalha}{nome}: {len(vs)}*")
+        for v in vs:
+            carro = " ".join(str(x) for x in (nome_carro(v), v.get("ano")) if x)
+            linhas.append(f"{carro} - {v['placa']}" if v.get("placa") else carro)
+    linhas.append("\n➖➖➖➖➖➖➖➖")
+    return "\n".join(linhas)
+
+
+def atualizar_descricao(forcar: bool = False) -> bool:
+    """Troca a descrição do grupo VENDAS quando o ranking do mês mudou (venda nova, venda que caiu)."""
+    import time
+    if not DESCRICAO_ATIVA and not forcar:
+        return False
+    if not forcar and time.time() - _descricao["t"] < 60:
+        return False
+    _descricao["t"] = time.time()
+    novo = texto_ranking()
+    if _descricao["aplicada"] is None:
+        _descricao["aplicada"] = evolution.descricao_grupo(GRUPO_VENDAS)
+    if novo.strip() == (_descricao["aplicada"] or "").strip():
+        return False
+    evolution.alterar_descricao_grupo(GRUPO_VENDAS, novo)
+    _descricao["aplicada"] = novo
+    return True

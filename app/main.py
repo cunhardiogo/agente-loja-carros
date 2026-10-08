@@ -86,6 +86,10 @@ def _tick_inner() -> None:
         vendas_grupo.checar_prazos()
     except Exception:
         log.exception("erro checando prazos de vendas")
+    try:
+        vendas_grupo.atualizar_descricao()
+    except Exception:
+        log.exception("erro atualizando descrição do grupo de vendas")
     if leads.sujo["v"] or vendas_grupo.sujo["v"] or _time.time() - _ult_controle["t"] > 120:  # edições ~2 min
         _ult_controle["t"] = _time.time()
         leads.sujo["v"] = vendas_grupo.sujo["v"] = False

@@ -246,6 +246,53 @@ def vendas_pendentes() -> dict:
     }
 
 
+def a_receber_vendas(periodo: str = "tudo", data_inicio: str | None = None, data_fim: str | None = None) -> dict:
+    """Quanto falta receber das vendas do grupo (outubro/2026 em diante): total − troca − comprovantes.
+    Separa o que ainda vem do banco (financiado) do que falta do cliente."""
+    from .sheets import DESDE
+    ini, fim = _resolve(periodo, data_inicio, data_fim)
+    nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
+    rows = [r for r in _vendas_validas("*") if (r.get("data_venda") or "") >= DESDE
+            and _dentro(r.get("data_venda"), ini, fim)]
+    itens, sem_valor = [], []
+    for r in rows:
+        carro = " ".join(x for x in (r.get("modelo"), r.get("versao"), r.get("placa")) if x)
+        total = r.get("valor_total") or r.get("valor_venda")
+        if not total:
+            sem_valor.append(carro)
+            continue
+        troca = r.get("troca_valor") or 0
+        pago = r.get("valor_pago") or 0
+        falta = round(max(total - troca - pago, 0), 2)
+        if falta <= 0:
+            continue
+        banco = min(r.get("valor_financiado") or 0, falta)
+        itens.append({"carro": carro, "cliente": r.get("cliente_nome"), "vendedor": nomes.get(r.get("vendedor_id")),
+                      "total": total, "troca": troca, "ja_pago_comprovado": pago, "falta": falta,
+                      "falta_do_banco": banco, "falta_do_cliente": round(falta - banco, 2)})
+    itens.sort(key=lambda x: -x["falta"])
+    return {"total_a_receber": round(sum(i["falta"] for i in itens), 2),
+            "do_banco_financiado": round(sum(i["falta_do_banco"] for i in itens), 2),
+            "dos_clientes": round(sum(i["falta_do_cliente"] for i in itens), 2),
+            "vendas": itens, "vendas_sem_valor_no_resumo": sem_valor,
+            "observacao": "Pago = só o que tem comprovante no grupo de vendas. Troca abate do total."}
+
+
+def marcar_venda_caiu(termo: str) -> dict:
+    """Venda que caiu: sai da contagem, do ranking e da descrição do grupo."""
+    t = db.ilike(termo)
+    rows = db.select("vendas", {"select": "id,modelo,versao,placa,cliente_nome", "removido": "eq.false",
+                                "status_venda": "in.(completa,aguardando_resumo,reservado)",
+                                "or": f"(modelo.{t},versao.{t},placa.{t},cliente_nome.{t})"})
+    if len(rows) != 1:
+        return {"erro": "nenhuma venda encontrada" if not rows else "mais de uma venda encontrada, especifique",
+                "encontradas": [" ".join(x for x in (r.get("modelo"), r.get("versao"), r.get("placa")) if x) for r in rows]}
+    db.update("vendas", {"status_venda": "desistiu"}, {"id": f"eq.{rows[0]['id']}"})
+    from . import vendas_grupo
+    vendas_grupo.sujo["v"] = True
+    return {"ok": True, "venda": " ".join(x for x in (rows[0].get("modelo"), rows[0].get("versao"), rows[0].get("placa")) if x)}
+
+
 def buscar_venda(termo: str) -> dict:
     """Uma venda por carro, placa ou cliente, com pagamentos (comprovantes) e documentos recebidos."""
     t = db.ilike(termo)
@@ -838,6 +885,8 @@ def _fmt_data_sp(iso: str) -> str:
 
 
 DISPATCH = {
+    "a_receber_vendas": a_receber_vendas,
+    "marcar_venda_caiu": marcar_venda_caiu,
     "vendas_pendentes": vendas_pendentes,
     "buscar_venda": buscar_venda,
     "leads_abertos": leads_abertos,
@@ -886,6 +935,16 @@ _DI = {"type": "string", "description": "Data início ISO YYYY-MM-DD (opcional, 
 _DF = {"type": "string", "description": "Data fim ISO YYYY-MM-DD (opcional)"}
 
 TOOLS = [
+    {"type": "function", "function": {
+        "name": "a_receber_vendas",
+        "description": "Quanto falta receber das vendas (de outubro/2026 em diante): total, quanto vem do banco (financiado) e quanto falta dos clientes, venda por venda. Pago = comprovantes postados no grupo de vendas.",
+        "parameters": {"type": "object", "properties": {"periodo": _PERIODO, "data_inicio": _DI, "data_fim": _DF}},
+    }},
+    {"type": "function", "function": {
+        "name": "marcar_venda_caiu",
+        "description": "Marca que uma venda caiu (cliente desistiu): ela sai da contagem de vendidos, do ranking e da descrição do grupo. Use quando o dono disser que a venda X caiu/cancelou.",
+        "parameters": {"type": "object", "properties": {"termo": {"type": "string", "description": "Carro, placa ou cliente"}}, "required": ["termo"]},
+    }},
     {"type": "function", "function": {
         "name": "vendas_pendentes",
         "description": "Vendas do grupo com pendência: avisadas sem Resumo de Venda (com prazo), resumos incompletos (campos faltando) e reservas em aberto.",
@@ -1131,7 +1190,7 @@ SYSTEM = """Você é o assistente da Loja SB (revenda de carros) respondendo o D
 Use SEMPRE as ferramentas para buscar dados reais — nunca invente números.
 
 CONTAGEM x VALOR: para CONTAR vendidos use 'vendidos' (fonte oficial = grupo de VENDAS; a venda conta no aviso "vendido", o Resumo de Venda é pendência). Para FATURAMENTO/ticket/over use 'resumo_vendas'.
-SEMPRE que falar de vendas/faturamento/financeiro, informe os DOIS juntos: FATURAMENTO (resumo_vendas) E A RECEBER (pendencias pagamento).
+SEMPRE que falar de vendas/faturamento/financeiro, informe os DOIS juntos: FATURAMENTO (resumo_vendas) E A RECEBER (a_receber_vendas). Para 'quanto falta receber' use SEMPRE a_receber_vendas.
 
 PERÍODOS: quando o usuário não disser, assuma o mês atual. Para períodos livres ("semana passada", "dia 5", "em maio", "últimos 7 dias"), \
 calcule data_inicio/data_fim em ISO a partir da DATA DE HOJE informada e passe nas ferramentas que aceitam (vendidos, resumo_vendas, ranking_vendedores, vendas_por_canal, margem_avaliacoes, conversao, resumo_agendamentos).
