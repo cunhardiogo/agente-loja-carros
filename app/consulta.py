@@ -219,10 +219,12 @@ def vendidos(periodo: str = "mes", data_inicio: str | None = None, data_fim: str
     return {"periodo": periodo, "quantidade": len(rows), "itens": itens}
 
 
-def _vendas_validas(select: str) -> list[dict]:
-    """Vendas que contam: não removidas, nem reserva, nem desistência."""
-    return db.select_all("vendas", {"select": select, "removido": "eq.false",
-                                    "status_venda": "in.(completa,aguardando_resumo)"})
+def _vendas_validas(select: str, incluir_revenda: bool = False) -> list[dict]:
+    """Vendas que contam: não removidas, nem reserva, nem desistência (revenda só quando pedida)."""
+    params = {"select": select, "removido": "eq.false", "status_venda": "in.(completa,aguardando_resumo)"}
+    if not incluir_revenda:
+        params["revenda"] = "eq.false"
+    return db.select_all("vendas", params)
 
 
 def vendas_pendentes() -> dict:
@@ -252,7 +254,7 @@ def a_receber_vendas(periodo: str = "tudo", data_inicio: str | None = None, data
     from .sheets import DESDE
     ini, fim = _resolve(periodo, data_inicio, data_fim)
     nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
-    rows = [r for r in _vendas_validas("*") if (r.get("data_venda") or "") >= DESDE
+    rows = [r for r in _vendas_validas("*", incluir_revenda=True) if (r.get("data_venda") or "") >= DESDE
             and _dentro(r.get("data_venda"), ini, fim)]
     itens, sem_valor = [], []
     for r in rows:
@@ -266,16 +268,17 @@ def a_receber_vendas(periodo: str = "tudo", data_inicio: str | None = None, data
         falta = round(max(total - troca - pago, 0), 2)
         if falta <= 0:
             continue
-        banco = min(r.get("valor_financiado") or 0, falta)
+        financ = min(r.get("valor_financiado") or 0, falta)
         itens.append({"carro": carro, "cliente": r.get("cliente_nome"), "vendedor": nomes.get(r.get("vendedor_id")),
-                      "total": total, "troca": troca, "ja_pago_comprovado": pago, "falta": falta,
-                      "falta_do_banco": banco, "falta_do_cliente": round(falta - banco, 2)})
+                      "revenda": r.get("revenda"), "total": total, "troca": troca, "ja_pago_comprovado": pago,
+                      "falta": falta, "falta_financiamento": financ, "falta_a_vista": round(falta - financ, 2)})
     itens.sort(key=lambda x: -x["falta"])
     return {"total_a_receber": round(sum(i["falta"] for i in itens), 2),
-            "do_banco_financiado": round(sum(i["falta_do_banco"] for i in itens), 2),
-            "dos_clientes": round(sum(i["falta_do_cliente"] for i in itens), 2),
+            "financiamento_banco": round(sum(i["falta_financiamento"] for i in itens), 2),
+            "a_vista": round(sum(i["falta_a_vista"] for i in itens), 2),
             "vendas": itens, "vendas_sem_valor_no_resumo": sem_valor,
-            "observacao": "Pago = só o que tem comprovante no grupo de vendas. Troca abate do total."}
+            "observacao": "Pago = só o que tem comprovante no grupo de vendas. Troca abate do total. "
+                          "Consórcio conta como à vista (carta de crédito paga à vista)."}
 
 
 def marcar_venda_caiu(termo: str) -> dict:
@@ -937,7 +940,7 @@ _DF = {"type": "string", "description": "Data fim ISO YYYY-MM-DD (opcional)"}
 TOOLS = [
     {"type": "function", "function": {
         "name": "a_receber_vendas",
-        "description": "Quanto falta receber das vendas (de outubro/2026 em diante): total, quanto vem do banco (financiado) e quanto falta dos clientes, venda por venda. Pago = comprovantes postados no grupo de vendas.",
+        "description": "Quanto falta receber das vendas (de outubro/2026 em diante, inclui revenda): total, quanto vem de financiamento bancário e quanto é à vista (consórcio conta como à vista), venda por venda. Pago = comprovantes postados no grupo de vendas.",
         "parameters": {"type": "object", "properties": {"periodo": _PERIODO, "data_inicio": _DI, "data_fim": _DF}},
     }},
     {"type": "function", "function": {

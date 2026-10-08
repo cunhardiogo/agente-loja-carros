@@ -171,3 +171,17 @@ def test_valor_formatos_br_e_americano():
 def test_troca_maior_que_total_vira_pendencia():
     f = vg.campos_venda(vg.parse_resumo(RESUMO.replace("🚘 Valor troca:", "🚘 Valor troca: R$520.000")), date(2026, 10, 7))
     assert "valor da troca (maior que o total)" in vg.pendencias_venda({**f, "vendedor_id": "v1"})
+
+
+def test_ranking_reserva_conta_e_revenda_abaixo_do_tracado(monkeypatch):
+    rows = [{"modelo": "Kwid", "ano": 2025, "placa": "SVN1D97", "vendedor_id": "y", "data_venda": "2026-10-05"},
+            {"modelo": "Pulse Hybrid", "placa": "TTC8B00", "vendedor_id": "y", "data_venda": None,
+             "reservado_em": "2026-10-06T18:32:00+00:00"},
+            {"modelo": "Asx", "ano": 2012, "placa": None, "vendedor_id": None, "data_venda": "2026-10-07", "revenda": True}]
+    monkeypatch.setattr(vg.db, "select", lambda t, p=None: [{"id": "y", "nome": "Yan"}])
+    monkeypatch.setattr(vg.db, "select_all", lambda t, p=None: rows)
+    txt = vg.texto_ranking("2026-10")
+    assert txt.startswith("💰*TOTAL DE VENDAS GRUPO SB: 2*")
+    assert "*🥇Yan: 2*\nKwid 2025 - SVN1D97\nPulse Hybrid - TTC8B00" in txt
+    assert txt.endswith("➖➖➖➖➖➖➖➖\nRevenda\n\nAsx 2012")
+    assert vg.eh_revenda("Asx 2012 vendida pra revenda") and vg._modelo_do_aviso("Asx 2012 vendida pra revenda") == "Asx 2012"

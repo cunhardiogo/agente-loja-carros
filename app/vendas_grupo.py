@@ -180,8 +180,13 @@ def classificar_aviso(texto: str) -> str | None:
     return None
 
 
+def eh_revenda(texto: str | None) -> bool:
+    return bool(re.search(r"\b(revenda|repasse)\b", _ascii(texto)))
+
+
 def _modelo_do_aviso(texto: str) -> str | None:
     t = _PLACA.sub(" ", texto)
+    t = re.sub(r"(?i)\b(pra|para|p/)\s+(revenda|repasse)\b|\b(revenda|repasse)\b", " ", t)
     t = re.sub(r"(?i)\b(vendid[oa]s?|vendeu|venda|reservad[oa]s?)\b|[✅🚗!.]", " ", t)
     t = re.sub(r"\s+", " ", t).strip(" -–")
     return t or None
@@ -324,7 +329,7 @@ def _aviso(tipo, texto, mid, autor, em, historico) -> dict:
     row = {"status_venda": novo_status, "origem": "grupo", "autor": autor, "aviso_message_id": mid,
            "aviso_em": _iso(em), "placa": placa, "modelo": modelo, "vendedor_id": vend["id"] if vend else None,
            "historico": historico, "contexto_em": _iso(em), "contexto_autor": autor,
-           "observacoes": texto}
+           "observacoes": texto, "revenda": eh_revenda(texto)}
     if tipo == "reserva":
         row["reservado_em"] = _iso(em)
     else:
@@ -621,7 +626,7 @@ def checar_prazos(agora: datetime | None = None) -> int:
                                     "origem": "eq.grupo", "status_venda": "in.(aguardando_resumo,completa,reservado)"})
     n = 0
     for v in rows:
-        if v.get("cobranca_status") == "proposta":
+        if v.get("cobranca_status") == "proposta" or v.get("revenda"):
             continue
         cobrado = v.get("cobrado") or {}
         if v["status_venda"] == "aguardando_resumo" and v.get("aviso_em") and "resumo" not in cobrado \
@@ -674,7 +679,7 @@ _MARCAS = {"fiat", "renault", "peugeot", "chevrolet", "gm", "volkswagen", "vw", 
            "nissan", "jeep", "citroen", "mitsubishi", "byd", "kia", "bmw", "mini", "audi", "yamaha", "suzuki", "caoa"}
 _MEDALHAS = ["🥇", "🥈", "🥉"]
 _descricao = {"aplicada": None, "t": 0.0}
-DESCRICAO_ATIVA = False  # liga quando o dono confirmar o formato (vendas de revenda, vendedor)
+DESCRICAO_ATIVA = True
 
 
 def nome_carro(v: dict) -> str:
@@ -685,14 +690,30 @@ def nome_carro(v: dict) -> str:
     return modelo or versao or "Carro"
 
 
+def _data_ranking(r: dict) -> str:
+    """Venda conta pela data da venda; reserva, pela data da reserva."""
+    if r.get("data_venda"):
+        return r["data_venda"]
+    d = _dt(r.get("reservado_em"))
+    return d.astimezone(datas.TZ).date().isoformat() if d else ""
+
+
+def _linha_carro(v: dict) -> str:
+    carro = " ".join(str(x) for x in (nome_carro(v), v.get("ano")) if x)
+    return f"{carro} - {v['placa']}" if v.get("placa") else carro
+
+
 def texto_ranking(mes: str | None = None) -> str:
-    """Descrição do grupo VENDAS: total do mês e vendas por vendedor (empate divide a medalha)."""
+    """Descrição do grupo VENDAS: total do mês e vendas por vendedor (reserva conta; empate divide a medalha).
+    Vendas para revenda ficam fora do total, listadas abaixo do traçado."""
     mes = mes or datas.hoje_iso()[:7]
     nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
-    rows = db.select_all("vendas", {"select": "modelo,versao,ano,placa,vendedor_id,data_venda", "removido": "eq.false",
-                                    "status_venda": "in.(completa,aguardando_resumo)",
-                                    "data_venda": f"gte.{mes}-01", "order": "data_venda.asc,created_at.asc"})
-    rows = [r for r in rows if (r.get("data_venda") or "")[:7] == mes]
+    rows = db.select_all("vendas", {"select": "modelo,versao,ano,placa,vendedor_id,data_venda,reservado_em,revenda,"
+                                    "created_at", "removido": "eq.false",
+                                    "status_venda": "in.(completa,aguardando_resumo,reservado)"})
+    rows = sorted([r for r in rows if _data_ranking(r)[:7] == mes], key=lambda r: (_data_ranking(r), r.get("created_at") or ""))
+    revenda = [r for r in rows if r.get("revenda")]
+    rows = [r for r in rows if not r.get("revenda")]
     por: dict[str, list] = {}
     for r in rows:
         por.setdefault(nomes.get(r.get("vendedor_id"), "Sem vendedor"), []).append(r)
@@ -703,10 +724,11 @@ def texto_ranking(mes: str | None = None) -> str:
         pos = qtds.index(len(vs))
         medalha = _MEDALHAS[pos] if pos < 3 else "🏅"
         linhas.append(f"\n*{medalha}{nome}: {len(vs)}*")
-        for v in vs:
-            carro = " ".join(str(x) for x in (nome_carro(v), v.get("ano")) if x)
-            linhas.append(f"{carro} - {v['placa']}" if v.get("placa") else carro)
+        linhas += [_linha_carro(v) for v in vs]
     linhas.append("\n➖➖➖➖➖➖➖➖")
+    if revenda:
+        linhas.append("Revenda\n")
+        linhas += [_linha_carro(v) for v in revenda]
     return "\n".join(linhas)
 
 

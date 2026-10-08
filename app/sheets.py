@@ -245,14 +245,14 @@ def sincronizar_leads(c: httpx.Client | None = None) -> int:
 # ===== aba Vendas (dois sentidos) =====
 ABA_VENDAS = "Vendas"
 CAB_VENDAS = ["Data venda", "Vendedor", "Carro", "Versão", "Ano", "Cor", "Placa", "Status", "Tabela", "Vendido",
-              "Desconto", "Over", "Total", "Banco", "Financiado", "Pix / pagamento", "Troca", "Cliente", "CPF",
+              "Desconto", "Over", "Total", "Banco", "Financiado", "Pix / pagamento", "Troca", "Valor troca", "Revenda", "Cliente", "CPF",
               "Telefone", "E-mail", "Portal", "Entrega prevista", "Pago (comprovantes)", "Situação pgto", "Docs",
               "Pendências", "Observação", "Cobrança", "Código", "ID"]
 EDIT_VENDAS = {"Data venda": "data_venda", "Vendedor": "vendedor_id", "Carro": "modelo", "Versão": "versao",
                "Ano": "ano", "Cor": "cor", "Placa": "placa", "Status": "status_venda", "Tabela": "tabela_preco",
                "Vendido": "valor_venda", "Desconto": "desconto", "Over": "over_valor", "Total": "valor_total",
                "Banco": "banco", "Financiado": "valor_financiado", "Pix / pagamento": "valor_pix",
-               "Troca": "troca_modelo", "Cliente": "cliente_nome", "CPF": "cliente_cpf",
+               "Troca": "troca_modelo", "Valor troca": "troca_valor", "Revenda": "revenda", "Cliente": "cliente_nome", "CPF": "cliente_cpf",
                "Telefone": "cliente_telefone", "E-mail": "cliente_email", "Portal": "portal_venda",
                "Entrega prevista": "data_entrega_prevista", "Observação": "observacoes"}
 _DOC_ROTULO = {"cnh": "CNH", "documento_identidade": "RG", "comprovante_residencia": "Residência", "contrato": "Contrato"}
@@ -270,7 +270,7 @@ def _linha_venda(v: dict, nomes: dict) -> list[str]:
         STATUS_LABEL.get(v.get("status_venda"), v.get("status_venda") or ""), _num(v.get("tabela_preco")),
         _num(v.get("valor_venda")), _num(v.get("desconto")), v.get("over_valor") or "", _num(v.get("valor_total")),
         v.get("banco") or "", _num(v.get("valor_financiado")), v.get("valor_pix") or "", v.get("troca_modelo") or "",
-        v.get("cliente_nome") or "", v.get("cliente_cpf") or "", v.get("cliente_telefone") or "",
+        _num(v.get("troca_valor")), "Sim" if v.get("revenda") else "", v.get("cliente_nome") or "", v.get("cliente_cpf") or "", v.get("cliente_telefone") or "",
         v.get("cliente_email") or "", v.get("portal_venda") or "",
         _fmt_d(v.get("data_entrega_prevista")) or (v.get("data_entrega_texto") or ""),
         _num(v.get("valor_pago")) if v.get("valor_pago") else "", v.get("status_pagamento") or "", docs_txt,
@@ -302,7 +302,9 @@ def _converter_venda(col: str, valor: str) -> dict:
         return {"ano": int(v) if v.isdigit() else None}
     if col == "Placa":
         return {"placa": placa_norm(v) or v or None}
-    if campo in ("tabela_preco", "valor_venda", "desconto", "valor_total", "valor_financiado"):
+    if col == "Revenda":
+        return {"revenda": _ascii(v).startswith(("s", "x"))}
+    if campo in ("tabela_preco", "valor_venda", "desconto", "valor_total", "valor_financiado", "troca_valor"):
         return {campo: _valor(v)}
     return {campo: v or None}
 
