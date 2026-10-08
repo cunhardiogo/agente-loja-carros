@@ -7,7 +7,7 @@ from datetime import timedelta
 from fastapi import BackgroundTasks, FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from . import (cobrancas, confirmacao, consulta, entregas_grupo, datas, db, evolution, ingest, leads, media, meta_ads, planilha, sheets,
+from . import (cobrancas, confirmacao, consulta, entregas_grupo, trello, datas, db, evolution, ingest, leads, media, meta_ads, planilha, sheets,
                supervisor, vendas_grupo)
 from .config import settings
 
@@ -48,6 +48,7 @@ import time as _time
 _ult_lembrete = {"t": 0.0}
 _ult_planilha = {"t": 0.0}
 _ult_controle = {"t": 0.0}
+_ult_trello = {"t": 0.0}
 _lojasb_ok = {"v": True}
 _tick_lock = threading.Lock()
 
@@ -103,6 +104,12 @@ def _tick_inner() -> None:
         except Exception:
             leads.sujo["v"] = vendas_grupo.sujo["v"] = entregas_grupo.sujo["v"] = True
             log.exception("erro escrevendo planilha de controle")
+    if _time.time() - _ult_trello["t"] > 180:  # quadro ESTOQUE do Trello a cada ~3 min
+        _ult_trello["t"] = _time.time()
+        try:
+            trello.sincronizar()
+        except Exception:
+            log.exception("erro sincronizando Trello")
     if _time.time() - _ult_planilha["t"] > 600:  # sync da planilha a cada ~10 min
         _ult_planilha["t"] = _time.time()
         try:

@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     planilha_sheet_id: str = ""
     # planilha de controle (Google Sheets) escrita por conta de serviço — JSON cru ou base64
     google_sa_json: str = ""
+    # Trello (quadro ESTOQUE): venda/entrega movem o cartão do carro
+    trello_key: str = ""
+    trello_token: str = ""
+    trello_board: str = ""
     # alternativa à conta de serviço: cliente OAuth + refresh token (autorizado uma vez)
     google_client_id: str = ""
     google_client_secret: str = ""
