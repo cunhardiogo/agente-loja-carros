@@ -254,7 +254,7 @@ def a_receber_vendas(periodo: str = "tudo", data_inicio: str | None = None, data
     from .sheets import DESDE
     ini, fim = _resolve(periodo, data_inicio, data_fim)
     nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
-    rows = [r for r in _vendas_validas("*", incluir_revenda=True) if (r.get("data_venda") or "") >= DESDE
+    rows = [r for r in _vendas_validas("*") if (r.get("data_venda") or "") >= DESDE
             and _dentro(r.get("data_venda"), ini, fim)]
     itens, sem_valor = [], []
     for r in rows:
@@ -940,7 +940,7 @@ _DF = {"type": "string", "description": "Data fim ISO YYYY-MM-DD (opcional)"}
 TOOLS = [
     {"type": "function", "function": {
         "name": "a_receber_vendas",
-        "description": "Quanto falta receber das vendas (de outubro/2026 em diante, inclui revenda): total, quanto vem de financiamento bancário e quanto é à vista (consórcio conta como à vista), venda por venda. Pago = comprovantes postados no grupo de vendas.",
+        "description": "Quanto falta receber das vendas (de outubro/2026 em diante, sem revenda): total, quanto vem de financiamento bancário e quanto é à vista (consórcio conta como à vista), venda por venda. Pago = comprovantes postados no grupo de vendas.",
         "parameters": {"type": "object", "properties": {"periodo": _PERIODO, "data_inicio": _DI, "data_fim": _DF}},
     }},
     {"type": "function", "function": {
