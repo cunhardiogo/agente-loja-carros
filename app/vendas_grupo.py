@@ -714,16 +714,21 @@ def texto_ranking(mes: str | None = None) -> str:
     rows = sorted([r for r in rows if _data_ranking(r)[:7] == mes], key=lambda r: (_data_ranking(r), r.get("created_at") or ""))
     revenda = [r for r in rows if r.get("revenda")]
     rows = [r for r in rows if not r.get("revenda")]
-    por: dict[str, list] = {}
+    # todo vendedor da equipe aparece sempre (mesmo com zero); só muda de posição
+    equipe = db.select("vendedores", {"select": "nome", "ativo": "eq.true", "funcao": "eq.vendedor",
+                                      "telefone": "not.is.null"})
+    por: dict[str, list] = {v["nome"]: [] for v in equipe}
     for r in rows:
         por.setdefault(nomes.get(r.get("vendedor_id"), "Sem vendedor"), []).append(r)
     ordem = sorted(por.items(), key=lambda kv: (-len(kv[1]), kv[0]))
     qtds = sorted({len(v) for v in por.values()}, reverse=True)
+    ultimo = min(qtds) if len(qtds) > 1 else None  # lanterna só quando há diferença
     linhas = [f"💰*TOTAL DE VENDAS GRUPO SB: {len(rows)}*"]
     for nome, vs in ordem:
         pos = qtds.index(len(vs))
         medalha = _MEDALHAS[pos] if pos < 3 else "🏅"
-        linhas.append(f"\n*{medalha}{nome}: {len(vs)}*")
+        lanterna = " 🔦" if len(vs) == ultimo else ""
+        linhas.append(f"\n*{medalha}{nome}: {len(vs)}*{lanterna}")
         linhas += [_linha_carro(v) for v in vs]
     linhas.append("\n➖➖➖➖➖➖➖➖")
     if revenda:

@@ -158,7 +158,15 @@ def test_queda_e_ranking(monkeypatch):
     txt = vg.texto_ranking("2026-10")
     assert txt.startswith("💰*TOTAL DE VENDAS GRUPO SB: 4*")
     assert "*🥇Vinicius: 2*\nFIT 2018 - LUH6H38\nMt03 2020 - RJR0E26" in txt
-    assert "*🥈Carlos: 1*\nFastback 2026 - TTD9E46" in txt and "*🥈Edson: 1*" in txt
+    assert "*🥈Carlos: 1* 🔦\nFastback 2026 - TTD9E46" in txt and "*🥈Edson: 1* 🔦" in txt
+
+
+def test_vendedor_zerado_aparece_com_lanterna(monkeypatch):
+    rows = [{"modelo": "Kwid", "ano": 2025, "placa": "SVN1D97", "vendedor_id": "y", "data_venda": "2026-10-05"}]
+    monkeypatch.setattr(vg.db, "select", lambda t, p=None: [{"id": "y", "nome": "Yan"}, {"id": "e", "nome": "Edson"}])
+    monkeypatch.setattr(vg.db, "select_all", lambda t, p=None: rows)
+    txt = vg.texto_ranking("2026-10")
+    assert "*🥇Yan: 1*\nKwid 2025 - SVN1D97" in txt and "*🥈Edson: 0* 🔦" in txt
 
 
 def test_valor_formatos_br_e_americano():
