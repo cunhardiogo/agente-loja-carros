@@ -104,11 +104,8 @@ def test_quadro_sumiu_entregue_e_lista_parcial(monkeypatch):
     r = eg.processar(_msg(LISTA, t0))
     assert r["novas"] == 4 and r["entregues"] == 0
     sem_mt = LISTA.replace("Veículo: MT 03", "Veículo: Fit 18").replace("07/10/2026", "08/10/2026")
-    # cópia de outra pessoa sem o MT 03 (que só apareceu em 1 lista) não dá baixa
-    r = eg.processar(_msg(sem_mt, t0 + timedelta(hours=2)))
-    assert r["entregues"] == 0 and {e["veiculo"]: e["status"] for e in fake.entregas}["MT 03"] == "agendada"
-    # na lista do dono o MT 03 sumiu → entregue
-    r = eg.processar(_msg(sem_mt, t0 + timedelta(hours=3), dono=True))
+    # MT 03 sumiu da lista (de qualquer pessoa) → entregue
+    r = eg.processar(_msg(sem_mt, t0 + timedelta(hours=3)))
     status = {e["veiculo"]: e["status"] for e in fake.entregas}
     assert status["MT 03"] == "entregue" and status["Fit 18"] == "agendada" and r["entregues"] == 1
     # voltou pra lista → reaberto, sem duplicar

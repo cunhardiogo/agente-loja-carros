@@ -402,7 +402,10 @@ def _ordem_horario(h: str | None) -> int:
 def agenda_do_dia_texto(dia: str | None = None) -> str:
     """Leads com data agendada pro dia (já com as edições da planilha), um resumo por lead."""
     dia = dia or datas.hoje_iso()
-    rows = db.select_all("leads", {"select": "*", "removido": "eq.false", "data_agendada": f"eq.{dia}"})
+    # data do formulário OU remarcado para o dia (resposta "dd/mm" no grupo / status na planilha)
+    rows = db.select_all("leads", {"select": "*", "removido": "eq.false",
+                                   "or": f"(data_agendada.eq.{dia},and(status.eq.remarcado,nova_data.eq.{dia}))"})
+    rows = [l for l in rows if not (l["status"] == "remarcado" and l.get("nova_data") and l["nova_data"] != dia)]
     rows.sort(key=lambda l: _ordem_horario(l.get("horario")))
     if not rows:
         return "📅 *Leads agendados pra hoje:* nenhum"

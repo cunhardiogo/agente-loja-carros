@@ -135,23 +135,11 @@ def _reabrir(item: dict, vend_id: str | None, em: datetime) -> dict | None:
     return {**alvo, "status": "agendada", "entregue_em": None}
 
 
-def _pode_dar_baixa(entrega: dict, autor_vend_id: str | None, autor_dono: bool) -> bool:
-    """Sumir na lista do próprio vendedor (ou do dono) = entregue. Na lista de outra pessoa, só se o carro já
-    tinha aparecido em 2 listas — senão é cópia desatualizada (ex: dois postando a lista ao mesmo tempo)."""
-    if autor_dono or (autor_vend_id and entrega.get("vendedor_id") == autor_vend_id):
-        return True
-    return (entrega.get("vezes_na_lista") or 0) >= 2
-
-
 def processar(data: dict, historico: bool = False) -> dict:
-    from .vendas_grupo import vendedor_por_lid, vendedor_por_nome
+    from .vendas_grupo import vendedor_por_nome
     texto = _texto(data.get("message") or {})
     if not texto or not eh_lista(texto):
         return {"ignored": "nao_e_lista"}
-    key = data.get("key") or {}
-    autor_dono = bool(key.get("fromMe"))
-    autor = vendedor_por_lid(key.get("participant"))
-    autor_vend_id = autor["id"] if autor else None
     em = _quando(data)
     ultima = _ultima_lista()
     if ultima and em <= ultima:
@@ -185,7 +173,7 @@ def processar(data: dict, historico: bool = False) -> dict:
     parcial = abertas_ids and len(vistas & abertas_ids) < PARCIAL * len(abertas_ids)
     if not parcial:
         for a in abertas:
-            if a["id"] not in vistas and _pode_dar_baixa(a, autor_vend_id, autor_dono):
+            if a["id"] not in vistas:  # sumiu da lista de qualquer pessoa = entregue (decisão do dono)
                 dar_baixa(a, em)
                 entregues += 1
     sujo["v"] = True
