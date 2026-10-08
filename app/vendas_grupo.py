@@ -596,6 +596,9 @@ def texto_cobranca(v: dict, motivo: str) -> str:
     if motivo == "pendencias":
         return (f"Fala {nome}! No Resumo de Venda do {carro} ficou faltando: {', '.join(v.get('pendencias') or [])}. "
                 f"Consegue completar lá no grupo (pode editar a mensagem)? 🙏")
+    if motivo == "sem_entrega":
+        return (f"Fala {nome}! A venda do {carro} ainda não está no quadro do grupo de entregas. "
+                f"Coloca lá com o dia e o horário combinados com o cliente 🙏")
     return (f"Fala {nome}! O {carro} está reservado desde {_hhmm(_dt(v['reservado_em']))}. "
             f"Fechou a venda ou o cliente desistiu? Me dá um retorno 🙏")
 
@@ -604,7 +607,8 @@ def _propor(v: dict, motivo: str, agora: datetime) -> bool:
     texto = texto_cobranca(v, motivo)
     cod = codigo(v)
     titulo = {"resumo": "Resumo de Venda atrasado", "pendencias": "Resumo de Venda incompleto",
-              "reserva": f"Reserva parada há {RESERVA_DIAS} dias"}[motivo]
+              "reserva": f"Reserva parada há {RESERVA_DIAS} dias",
+              "sem_entrega": "Venda fora do quadro de entregas"}[motivo]
     try:
         evolution.enviar_texto(settings.meu_numero,
                                f"📨 {titulo} — cobrança pro {_nome_vendedor(v)} [#{cod}]\n{_carro(v)}\n\n\"{texto}\"\n\n"
@@ -654,7 +658,11 @@ def _resolvida(atual: dict) -> bool:
     motivo = atual.get("cobranca_motivo")
     return (motivo == "resumo" and atual["status_venda"] != "aguardando_resumo") or \
         (motivo == "pendencias" and not atual.get("pendencias")) or \
-        (motivo == "reserva" and atual["status_venda"] != "reservado")
+        (motivo == "reserva" and atual["status_venda"] != "reservado") or \
+        (motivo == "sem_entrega" and (atual.get("status_entrega") == "entregue" or bool(
+            db.select("entregas", {"select": "id", "venda_id": f"eq.{atual['id']}", "removido": "eq.false",
+                                   "limit": "1"}))))
+
 
 def _enviar(venda: dict, msg: str) -> str:
     atual = db.select("vendas", {"select": "*", "id": f"eq.{venda['id']}", "limit": "1"})[0]

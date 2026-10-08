@@ -340,16 +340,18 @@ def reservados(periodo: str = "mes") -> dict:
 
 
 def entregas_agendadas(periodo: str = "mes") -> dict:
+    """Quadro do grupo de entregas: o que ainda não foi entregue (com data no período) e as sem data."""
     ini, fim = _range_futuro(periodo)  # entregas são futuras: olha pra frente
-    nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
     rows = db.select_all("entregas", {
-        "select": "veiculo,data_entrega,horario,vendedor_id,observacao,status",
+        "select": "veiculo,data_entrega,data_texto,horario,vendedor_nome,observacao,status",
+        "origem": "in.(grupo,planilha)", "status": "eq.agendada", "removido": "eq.false",
         "order": "data_entrega.asc.nullslast",
     })
-    rows = [r for r in rows if _dentro(r.get("data_entrega"), ini, fim)]
-    for r in rows:
-        r["vendedor"] = nomes.get(r.pop("vendedor_id"), "—")
-    return {"periodo": periodo, "quantidade": len(rows), "entregas": rows}
+    com_data = [r for r in rows if r.get("data_entrega") and _dentro(r["data_entrega"], ini, fim)]
+    atrasadas = [r for r in rows if r.get("data_entrega") and r["data_entrega"] < datas.hoje_iso()]
+    sem_data = [r for r in rows if not r.get("data_entrega")]
+    return {"periodo": periodo, "quantidade": len(com_data), "entregas": com_data,
+            "atrasadas_ainda_no_quadro": atrasadas, "sem_data": sem_data}
 
 
 def lista_vendas(periodo: str = "tudo") -> dict:

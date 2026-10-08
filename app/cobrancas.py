@@ -2,7 +2,7 @@
 com uma única cobrança esperando, 'ok' / 'pode enviar' / 'não' / 'texto novo: ...' sem código."""
 import re
 
-from . import db, ingest, leads, vendas_grupo
+from . import db, entregas_grupo, ingest, leads, vendas_grupo
 from .leads import _ascii
 
 _AFIRMA = {"ok", "sim", "s", "envia", "enviar", "manda", "mandar", "pode", "pode enviar", "pode mandar",
@@ -20,19 +20,27 @@ def _pendentes() -> list[dict]:
     for v in db.select("vendas", {"select": "*", "cobranca_status": "eq.proposta"}):
         out.append({"origem": "venda", "row": v, "codigo": vendas_grupo.codigo(v),
                     "rotulo": f"{vendas_grupo._nome_vendedor(v)} — {vendas_grupo._carro(v)}"})
+    for e in db.select("entregas", {"select": "*", "cobranca_status": "eq.proposta"}):
+        out.append({"origem": "entrega", "row": e, "codigo": entregas_grupo.codigo(e),
+                    "rotulo": f"{e.get('vendedor_nome') or 'vendedor'} — entrega {e.get('veiculo') or '?'} sem data"})
     return out
 
 
+_MODULO = {"lead": (leads, "leads"), "venda": (vendas_grupo, "vendas"), "entrega": (entregas_grupo, "entregas")}
+
+
 def _descartar(p: dict) -> str:
-    tabela = "leads" if p["origem"] == "lead" else "vendas"
+    modulo, tabela = _MODULO[p["origem"]]
     db.update(tabela, {"cobranca_status": "descartada"}, {"id": f"eq.{p['row']['id']}"})
-    (leads if p["origem"] == "lead" else vendas_grupo).sujo["v"] = True
+    modulo.sujo["v"] = True
     return f"Ok, cobrança #{p['codigo']} descartada."
 
 
 def _enviar(p: dict, msg: str) -> str:
     if p["origem"] == "lead":
         return leads._enviar_cobranca(p["row"], msg)
+    if p["origem"] == "entrega":
+        return entregas_grupo._enviar(p["row"], msg)
     return vendas_grupo._enviar(p["row"], msg)
 
 

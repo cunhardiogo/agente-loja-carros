@@ -246,7 +246,7 @@ def sincronizar_leads(c: httpx.Client | None = None) -> int:
 ABA_VENDAS = "Vendas"
 CAB_VENDAS = ["Data venda", "Vendedor", "Carro", "Versão", "Ano", "Cor", "Placa", "Status", "Tabela", "Vendido",
               "Desconto", "Over", "Total", "Banco", "Financiado", "Pix / pagamento", "Troca", "Valor troca", "Revenda", "Cliente", "CPF",
-              "Telefone", "E-mail", "Portal", "Entrega prevista", "Pago (comprovantes)", "Situação pgto", "Docs",
+              "Telefone", "E-mail", "Portal", "Entrega prevista", "Entregue em", "Pago (comprovantes)", "Situação pgto", "Docs",
               "Pendências", "Observação", "Cobrança", "Código", "ID"]
 EDIT_VENDAS = {"Data venda": "data_venda", "Vendedor": "vendedor_id", "Carro": "modelo", "Versão": "versao",
                "Ano": "ano", "Cor": "cor", "Placa": "placa", "Status": "status_venda", "Tabela": "tabela_preco",
@@ -272,7 +272,7 @@ def _linha_venda(v: dict, nomes: dict) -> list[str]:
         v.get("banco") or "", _num(v.get("valor_financiado")), v.get("valor_pix") or "", v.get("troca_modelo") or "",
         _num(v.get("troca_valor")), "Sim" if v.get("revenda") else "", v.get("cliente_nome") or "", v.get("cliente_cpf") or "", v.get("cliente_telefone") or "",
         v.get("cliente_email") or "", v.get("portal_venda") or "",
-        _fmt_d(v.get("data_entrega_prevista")) or (v.get("data_entrega_texto") or ""),
+        _fmt_d(v.get("data_entrega_prevista")) or (v.get("data_entrega_texto") or ""), _fmt_d(v.get("data_entrega_real")),
         _num(v.get("valor_pago")) if v.get("valor_pago") else "", v.get("status_pagamento") or "", docs_txt,
         ", ".join(v.get("pendencias") or []), v.get("observacoes") or "", v.get("cobranca_status") or "",
         codigo(v), v["id"],
@@ -360,9 +360,76 @@ def sincronizar_pagamentos(c: httpx.Client) -> int:
     return len(pags)
 
 
+# ===== aba Entregas (dois sentidos) =====
+ABA_ENTREGAS = "Entregas"
+CAB_ENTREGAS = ["Dia", "Horário", "Vendedor", "Carro", "O que fazer", "Loja", "Status", "Entregue em", "Venda",
+                "Cobrança", "Código", "ID"]
+EDIT_ENTREGAS = {"Dia": "data_entrega", "Horário": "horario", "Vendedor": "vendedor_nome", "Carro": "veiculo",
+                 "O que fazer": "observacao", "Loja": "loja", "Status": "status"}
+
+
+def _linha_entrega(e: dict, vendas: dict) -> list[str]:
+    from .entregas_grupo import STATUS_LABEL, codigo
+    v = vendas.get(e.get("venda_id"))
+    venda = " ".join(x for x in (v.get("modelo"), v.get("placa")) if x) if v else ""
+    return [_fmt_d(e.get("data_entrega")) or (e.get("data_texto") or ""), e.get("horario") or "",
+            e.get("vendedor_nome") or "", e.get("veiculo") or "", e.get("observacao") or "", e.get("loja") or "",
+            STATUS_LABEL.get(e.get("status"), e.get("status") or ""), _fmt_dt(e.get("entregue_em")), venda,
+            e.get("cobranca_status") or "", codigo(e), e["id"]]
+
+
+def _converter_entrega(col: str, valor: str) -> dict:
+    from .leads import _ascii
+    from .entregas_grupo import _data_entrega
+    from .vendas_grupo import vendedor_por_nome
+    v = valor.strip()
+    if col == "Dia":
+        return {"data_entrega": _data_entrega(v, datas.hoje()), "data_texto": v or None}
+    if col == "Vendedor":
+        vend = vendedor_por_nome(v)
+        return {"vendedor_nome": v or None, "vendedor_id": vend["id"] if vend else None}
+    if col == "Status":
+        entregue = _ascii(v).startswith("entreg")
+        return {"status": "entregue" if entregue else "agendada",
+                "entregue_em": datas.agora().isoformat() if entregue else None}
+    return {EDIT_ENTREGAS[col]: v or None}
+
+
+def _entregas_visiveis() -> list[dict]:
+    rows = db.select_all("entregas", {"select": "*", "removido": "eq.false", "origem": "in.(grupo,planilha)",
+                                      "order": "status.asc,data_entrega.asc.nullsfirst"})
+    return [e for e in rows if (e.get("primeira_vez_em") or e["created_at"])[:10] >= DESDE]
+
+
+def sincronizar_entregas(c: httpx.Client) -> int:
+    from uuid import uuid4
+    from . import entregas_grupo, vendas_grupo
+    _garantir_aba(c, ABA_ENTREGAS)
+    planilha = _ler(c, ABA_ENTREGAS)
+    vis = {e["id"]: e for e in _entregas_visiveis()}
+    if _importar(planilha, vis, EDIT_ENTREGAS, _converter_entrega, "entregas", entregas_grupo.codigo,
+                 ("Carro",), lambda: {"origem": "planilha", "status": "agendada", "historico": True,
+                                      "primeira_vez_em": datas.agora().isoformat(), "ref_externa": f"manual:{uuid4()}"}):
+        # edição da equipe também vale para a venda ligada (data de entrega e entregue)
+        for e in _entregas_visiveis():
+            if not e.get("venda_id"):
+                continue
+            upd = {"data_entrega_prevista": e.get("data_entrega")}
+            if e["status"] == "entregue":
+                upd.update({"status_entrega": "entregue", "data_entrega_real": (e.get("entregue_em") or "")[:10] or None})
+            db.update("vendas", upd, {"id": f"eq.{e['venda_id']}"})
+        vendas_grupo.sujo["v"] = True
+    rows = _entregas_visiveis()
+    vendas = {v["id"]: v for v in db.select_all("vendas", {"select": "id,modelo,placa"})}
+    valores = [CAB_ENTREGAS] + [_linha_entrega(e, vendas) for e in rows]
+    _escrever_se_mudou(c, ABA_ENTREGAS, CAB_ENTREGAS, planilha, valores)
+    _gravar_snaps("entregas", rows, valores, CAB_ENTREGAS, EDIT_ENTREGAS)
+    return len(rows)
+
+
 def sincronizar_tudo() -> dict:
     if not configurado():
         return {}
     with _cliente() as c:
         return {"agendamentos": sincronizar_leads(c), "vendas": sincronizar_vendas(c),
-                "pagamentos": sincronizar_pagamentos(c)}
+                "entregas": sincronizar_entregas(c), "pagamentos": sincronizar_pagamentos(c)}

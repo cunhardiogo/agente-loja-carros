@@ -7,7 +7,7 @@ from datetime import timedelta
 from fastapi import BackgroundTasks, FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from . import (cobrancas, confirmacao, consulta, datas, db, evolution, ingest, leads, media, meta_ads, planilha, sheets,
+from . import (cobrancas, confirmacao, consulta, entregas_grupo, datas, db, evolution, ingest, leads, media, meta_ads, planilha, sheets,
                supervisor, vendas_grupo)
 from .config import settings
 
@@ -87,16 +87,21 @@ def _tick_inner() -> None:
     except Exception:
         log.exception("erro checando prazos de vendas")
     try:
+        entregas_grupo.checar_prazos()
+    except Exception:
+        log.exception("erro checando prazos de entregas")
+    try:
         vendas_grupo.atualizar_descricao()
     except Exception:
         log.exception("erro atualizando descrição do grupo de vendas")
-    if leads.sujo["v"] or vendas_grupo.sujo["v"] or _time.time() - _ult_controle["t"] > 120:  # edições ~2 min
+    mudou = leads.sujo["v"] or vendas_grupo.sujo["v"] or entregas_grupo.sujo["v"]
+    if mudou or _time.time() - _ult_controle["t"] > 120:  # edições da equipe ~2 min
         _ult_controle["t"] = _time.time()
-        leads.sujo["v"] = vendas_grupo.sujo["v"] = False
+        leads.sujo["v"] = vendas_grupo.sujo["v"] = entregas_grupo.sujo["v"] = False
         try:
             sheets.sincronizar_tudo()
         except Exception:
-            leads.sujo["v"] = vendas_grupo.sujo["v"] = True
+            leads.sujo["v"] = vendas_grupo.sujo["v"] = entregas_grupo.sujo["v"] = True
             log.exception("erro escrevendo planilha de controle")
     if _time.time() - _ult_planilha["t"] > 600:  # sync da planilha a cada ~10 min
         _ult_planilha["t"] = _time.time()
@@ -346,6 +351,8 @@ def _rotear_evento(body: dict) -> dict:
             return leads.processar(data)
         if grupo and grupo.get("tipo") == "vendas":
             return vendas_grupo.processar(data, instancia, apikey)
+        if grupo and grupo.get("tipo") == "entregas":
+            return entregas_grupo.processar(data)
 
     # texto direto OU transcrição de áudio OU leitura de imagem
     texto = media.conteudo_texto(instancia, apikey, data)
@@ -588,27 +595,23 @@ def _reservado_carro(it: dict) -> str:
 def _agenda_manha_texto() -> str:
     hoje = datas.hoje_iso()
     try:  # traz as edições da equipe na planilha de controle antes de listar
-        sheets.sincronizar_leads()
+        sheets.sincronizar_tudo()
     except Exception:
         log.exception("erro lendo planilha de controle antes da agenda")
 
-    vendas = db.select_all("vendas", {"select": "cliente_nome,modelo,versao,status_entrega,data_entrega_prevista"})
-    pend = [v for v in vendas if v.get("status_entrega") != "entregue"]
-    hoje_ent = [v for v in pend if (v.get("data_entrega_prevista") or "")[:10] == hoje]
-    ent_txt = ", ".join(f"{_carro(v)} ({v.get('cliente_nome') or ''})" for v in hoje_ent) if hoje_ent else "nenhuma"
-
-    res = consulta.reservados("mes")
-    res_txt = str(res["quantidade"])
-    if res["quantidade"]:
-        res_txt += " (" + ", ".join(_reservado_carro(i) for i in res["itens"]) + ")"
+    nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
+    reservas = db.select_all("vendas", {"select": "modelo,versao,placa,vendedor_id", "status_venda": "eq.reservado",
+                                        "removido": "eq.false"})
+    res_txt = str(len(reservas))
+    if reservas:
+        res_txt += " (" + ", ".join(f"{vendas_grupo.nome_carro(r)} – {nomes.get(r.get('vendedor_id'), '?')}"
+                                    for r in reservas) + ")"
 
     linhas = [
         f"☀️ *Bom dia! Agenda de hoje* ({datas.hoje().strftime('%d/%m')})",
-        f"🚗 Entregas marcadas hoje: {ent_txt}",
-        f"🅿️ Reservados aguardando: {res_txt}",
+        "\n" + entregas_grupo.agenda_do_dia_texto(hoje),
+        f"\n🅿️ Reservados aguardando: {res_txt}",
     ]
-    if hoje_ent:
-        linhas.append("\n👉 Já entregou alguma? Responde \"entreguei o [carro]\" que eu atualizo.")
     linhas.append("\n" + leads.agenda_do_dia_texto(hoje))
     return "\n".join(linhas)
 
