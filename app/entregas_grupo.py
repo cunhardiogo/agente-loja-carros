@@ -390,8 +390,8 @@ def checar_posvenda(agora: datetime | None = None) -> int:
 
 
 def enviar_posvenda(v: dict, msg: str) -> str:
-    """Sai pelo número da loja (o do agente), que é o que o cliente conhece."""
-    evolution.enviar_texto(v["cliente_telefone"], msg)
+    """Sai pelo número do dono (diogo4895) — nada vai pra cliente ou vendedor pelo número da loja."""
+    evolution.enviar_por_coletor(v["cliente_telefone"], msg)
     db.update("vendas", {"posvenda_status": "enviada", "posvenda_texto": msg,
                          "posvenda_enviada_em": _iso(datetime.now(timezone.utc))}, {"id": f"eq.{v['id']}"})
     return f"✅ Mensagem de pós-venda enviada pro {v.get('cliente_nome') or 'cliente'}."
