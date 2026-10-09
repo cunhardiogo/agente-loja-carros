@@ -230,3 +230,50 @@ def sincronizar_checklists(c: httpx.Client) -> int:
         db.update("entregas", {"trello_checklist_id": chk, "checklist_itens": ja + novos}, {"id": f"eq.{e['id']}"})
         n += 1
     return n
+
+
+# ===== usado pela preparação =====
+def cartoes(c: httpx.Client) -> tuple[list[dict], dict]:
+    cards = c.get(f"/boards/{settings.trello_board}/cards", params={"fields": "name,idList"}).json()
+    listas = {l["id"]: _ascii(l["name"]).strip() for l in c.get(f"/boards/{settings.trello_board}/lists").json()}
+    return cards, listas
+
+
+def achar_cartao(texto: str | None, cards: list[dict], listas: dict) -> dict | None:
+    """'208 azul', 'Civic 2014', 'RJR-0E26' → cartão do carro (fora do FINALIZADO). Só devolve se for único."""
+    if not texto:
+        return None
+    vivos = [cd for cd in cards if listas.get(cd["idList"]) != FINALIZADO]
+    p = _placa(texto)
+    if p:
+        achados = [cd for cd in vivos if _placa(cd["name"]) == p]
+        if len(achados) == 1:
+            return achados[0]
+    a = _ascii(texto)
+    toks = [t for t in re.split(r"[^a-z0-9]+", a) if (len(t) >= 3 or t.isdigit()) and t not in _GENERICOS]
+    ano = re.search(r"\b(19|20)\d{2}\b", texto)
+    modelo = [t for t in toks if not re.fullmatch(r"(19|20)\d{2}", t)]
+    if not modelo:
+        return None
+    cands = [cd for cd in vivos if all(re.search(r"\b" + re.escape(t) + r"\b", _ascii(cd["name"])) for t in modelo[:1])]
+    if ano:
+        cands = [cd for cd in cands if ano.group() in cd["name"]] or cands
+    if len(cands) > 1:  # palavras extras ("azul", "branco", versão) desempatam
+        melhor = max(sum(1 for t in modelo if t in _ascii(cd["name"])) for cd in cands)
+        cands = [cd for cd in cands if sum(1 for t in modelo if t in _ascii(cd["name"])) == melhor]
+    return cands[0] if len(cands) == 1 else None
+
+
+def item_checklist(c: httpx.Client, card_id: str, texto: str, nome: str = "Preparação") -> str:
+    lists = c.get(f"/cards/{card_id}/checklists").json()
+    chk = next((x for x in lists if x["name"] == nome), None)
+    chk_id = chk["id"] if chk else c.post(f"/cards/{card_id}/checklists", params={"name": nome}).json()["id"]
+    return c.post(f"/checklists/{chk_id}/checkItems", params={"name": texto}).json()["id"]
+
+
+def concluir_item(c: httpx.Client, card_id: str, item_id: str) -> None:
+    c.put(f"/cards/{card_id}/checkItem/{item_id}", params={"state": "complete"}).raise_for_status()
+
+
+def comentar(c: httpx.Client, card_id: str, texto: str) -> None:
+    c.post(f"/cards/{card_id}/actions/comments", params={"text": texto}).raise_for_status()

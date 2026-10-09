@@ -7,7 +7,7 @@ from datetime import timedelta
 from fastapi import BackgroundTasks, FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from . import (cobrancas, confirmacao, consulta, entregas_grupo, trello, datas, db, evolution, ingest, leads, media, meta_ads, planilha, sheets,
+from . import (cobrancas, confirmacao, consulta, entregas_grupo, preparacao_grupo, trello, datas, db, evolution, ingest, leads, media, meta_ads, planilha, sheets,
                supervisor, vendas_grupo)
 from .config import settings
 
@@ -87,6 +87,10 @@ def _tick_inner() -> None:
         vendas_grupo.checar_prazos()
     except Exception:
         log.exception("erro checando prazos de vendas")
+    try:
+        preparacao_grupo.checar_paradas()
+    except Exception:
+        log.exception("erro checando preparação parada")
     try:
         entregas_grupo.checar_posvenda()
     except Exception:
@@ -367,6 +371,8 @@ def _rotear_evento(body: dict) -> dict:
             return vendas_grupo.processar(data, instancia, apikey)
         if grupo and grupo.get("tipo") == "entregas":
             return entregas_grupo.processar(data)
+        if grupo and grupo.get("tipo") == "preparacao":
+            return preparacao_grupo.processar(data, instancia, apikey)
 
     # texto direto OU transcrição de áudio OU leitura de imagem
     texto = media.conteudo_texto(instancia, apikey, data)
@@ -627,6 +633,9 @@ def _agenda_manha_texto() -> str:
         f"\n🅿️ Reservados aguardando: {res_txt}",
     ]
     linhas.append("\n" + leads.agenda_do_dia_texto(hoje))
+    prep = preparacao_grupo.agenda_texto()
+    if prep:
+        linhas.append("\n" + prep)
     return "\n".join(linhas)
 
 
