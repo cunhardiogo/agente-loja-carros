@@ -69,15 +69,40 @@ def _por_modelo(v: dict, cards: list[dict], listas: dict, vendedor: str | None) 
     return cands[0] if len(cands) == 1 else None
 
 
+_MARCA_DO_MODELO = {
+    "kicks": "Nissan", "sentra": "Nissan", "versa": "Nissan", "onix": "Chevrolet", "cruze": "Chevrolet",
+    "tracker": "Chevrolet", "fit": "Honda", "city": "Honda", "civic": "Honda", "hr-v": "Honda", "hrv": "Honda",
+    "wr-v": "Honda", "wrv": "Honda", "jimny": "Suzuki", "xmax": "Yamaha", "mt-03": "Yamaha", "mt03": "Yamaha",
+    "nmax": "Yamaha", "fastback": "Fiat", "pulse": "Fiat", "toro": "Fiat", "argo": "Fiat", "cronos": "Fiat",
+    "palio": "Fiat", "mobi": "Fiat", "strada": "Fiat", "kwid": "Renault", "duster": "Renault", "2008": "Peugeot",
+    "208": "Peugeot", "c3": "Citroen", "creta": "Hyundai", "hb20": "Hyundai", "hb20s": "Hyundai", "corolla": "Toyota",
+    "yaris": "Toyota", "compass": "Jeep", "renegade": "Jeep", "commander": "Jeep", "outlander": "Mitsubishi",
+    "pajero": "Mitsubishi", "nivus": "Volkswagen", "polo": "Volkswagen", "jetta": "Volkswagen", "gol": "Volkswagen",
+    "countryman": "Mini", "dolphin": "BYD", "seal": "BYD", "king": "BYD", "ka": "Ford", "ecosport": "Ford",
+}
+_MARCAS = {"fiat": "Fiat", "renault": "Renault", "peugeot": "Peugeot", "chevrolet": "Chevrolet", "honda": "Honda",
+           "toyota": "Toyota", "hyundai": "Hyundai", "nissan": "Nissan", "jeep": "Jeep", "citroen": "Citroen",
+           "mitsubishi": "Mitsubishi", "byd": "BYD", "yamaha": "Yamaha", "volkswagen": "Volkswagen", "ford": "Ford",
+           "mini": "Mini", "suzuki": "Suzuki", "kia": "Kia", "bmw": "BMW"}
+
+
 def nome_cartao(v: dict, vendedor: str | None) -> str:
-    """Mesmo padrão do quadro: 'FASTBACK 2026 (TTD-9E46) - Carlos'."""
-    from .vendas_grupo import nome_carro
-    placa = (v.get("placa") or "").upper()
+    """Padrão do quadro: 'Fiat Fastback 2026 (TTD-9E46) - Carlos'."""
+    modelo, versao = (v.get("modelo") or "").strip(), (v.get("versao") or "").strip()
+    marca = _MARCAS.get(_ascii(modelo).split()[0] if modelo else "")
+    if marca and _ascii(modelo) in _MARCAS and versao:  # resumo com 'Modelo: FIAT / Versão: Fastback'
+        modelo = versao
+    elif marca:
+        modelo = " ".join(modelo.split()[1:]) or versao
+    modelo = re.sub(r"\b(19|20)\d{2}\b", "", modelo).strip()
+    primeira = _ascii(modelo).split()[0] if modelo else ""
+    marca = marca or _MARCA_DO_MODELO.get(primeira)
+    nome_modelo = " ".join(w.upper() if any(ch.isdigit() for ch in w) or _ascii(w) in {"byd", "gti", "xei"}
+                           else w.capitalize() for w in modelo.split())
+    placa = (v.get("placa") or "").replace("-", "").upper()
+    nome = " ".join(x for x in (marca, nome_modelo, str(v.get("ano") or "")) if x)
     if len(placa) == 7:
-        placa = f"{placa[:3]}-{placa[3:]}"
-    nome = " ".join(str(x) for x in (nome_carro(v).upper(), v.get("ano")) if x)
-    if placa:
-        nome += f" ({placa})"
+        nome += f" ({placa[:3]}-{placa[3:]})"
     return f"{nome} - {vendedor}" if vendedor else nome
 
 
