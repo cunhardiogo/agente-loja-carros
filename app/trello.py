@@ -69,10 +69,21 @@ def _por_modelo(v: dict, cards: list[dict], listas: dict, vendedor: str | None) 
     return cands[0] if len(cands) == 1 else None
 
 
+def nome_cartao(v: dict, vendedor: str | None) -> str:
+    """Mesmo padrão do quadro: 'FASTBACK 2026 (TTD-9E46) - Carlos'."""
+    from .vendas_grupo import nome_carro
+    placa = (v.get("placa") or "").upper()
+    if len(placa) == 7:
+        placa = f"{placa[:3]}-{placa[3:]}"
+    nome = " ".join(str(x) for x in (nome_carro(v).upper(), v.get("ano")) if x)
+    if placa:
+        nome += f" ({placa})"
+    return f"{nome} - {vendedor}" if vendedor else nome
+
+
 def plano(c: httpx.Client) -> list[dict]:
     """O que precisa mudar no quadro (sem aplicar)."""
     from .sheets import DESDE
-    from .vendas_grupo import nome_carro
     listas = {l["id"]: _ascii(l["name"]).strip() for l in c.get(f"/boards/{settings.trello_board}/lists").json()}
     por_nome = {v: k for k, v in listas.items()}
     cards = c.get(f"/boards/{settings.trello_board}/cards", params={"fields": "name,idList,due"}).json()
@@ -94,7 +105,14 @@ def plano(c: httpx.Client) -> list[dict]:
             (v.get("placa") or "").replace("-", "").upper()) or _por_modelo(v, cards, listas,
                                                                            nomes.get(v.get("vendedor_id")))
         if not card:
-            acoes.append({"venda": v, "acao": "sem_cartao", "carro": f"{nome_carro(v)} {v.get('placa') or ''}"})
+            if v["status_venda"] != "desistiu" and por_nome.get(VENDIDOS):
+                destino = FINALIZADO if v.get("status_entrega") == "entregue" else VENDIDOS
+                novo = {"idList": por_nome.get(destino) or por_nome[VENDIDOS],
+                        "name": nome_cartao(v, nomes.get(v.get("vendedor_id")))}
+                due = _due({**v, "_horario": horarios.get(v["id"])}) if destino == VENDIDOS else None
+                if due:
+                    novo["due"] = due
+                acoes.append({"venda": v, "acao": "criar", "criar": novo, "para": destino})
             continue
         lista = listas.get(card["idList"], "")
         if lista == FINALIZADO and v["status_venda"] != "desistiu" and v.get("status_entrega") != "entregue":
@@ -132,7 +150,9 @@ def sincronizar(aplicar: bool = True) -> list[dict]:
         acoes = plano(c)
         if aplicar:
             for a in acoes:
-                if a.get("acao") == "sem_cartao":
+                if a.get("acao") == "criar":
+                    card = c.post("/cards", params=a["criar"]).json()
+                    db.update("vendas", {"trello_card_id": card["id"]}, {"id": f"eq.{a['venda']['id']}"})
                     continue
                 if a.get("entregue_no_trello"):
                     db.update("vendas", {"status_entrega": "entregue",
