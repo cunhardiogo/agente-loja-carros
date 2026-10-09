@@ -6,3 +6,4 @@ venv/
 db/apply.py
 db/check.py
 CONTEXTO_PRIVADO.md
+scripts/trello_nomes_antes_*.json
