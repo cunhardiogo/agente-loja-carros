@@ -32,7 +32,8 @@ def _cliente() -> httpx.Client:
 
 
 def _placa(texto: str | None) -> str | None:
-    m = re.search(r"\b([A-Za-z]{3})[\s-]?(\d[A-Za-z0-9]\d{2})\b", texto or "")
+    # sem espaço entre letras e números: "WRV 2021" é modelo + ano, não placa
+    m = re.search(r"\b([A-Za-z]{3})-?(\d[A-Za-z0-9]\d{2})\b", texto or "")
     return (m.group(1) + m.group(2)).upper() if m else None
 
 
