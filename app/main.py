@@ -53,7 +53,7 @@ _lojasb_ok = {"v": True}
 _tick_lock = threading.Lock()
 
 # envios automáticos pausados enquanto os processos de cada grupo são remontados
-RELATORIOS_ATIVOS = {"planejamento", "agenda"}  # fechamento e semanal pausados
+RELATORIOS_ATIVOS = {"planejamento", "agenda", "vespera_entregas"}  # fechamento e semanal pausados
 RADAR_ATIVO = False       # alertas do supervisor e aviso de queda do número do agente
 LEMBRETES_ATIVOS = False
 
@@ -87,6 +87,10 @@ def _tick_inner() -> None:
         vendas_grupo.checar_prazos()
     except Exception:
         log.exception("erro checando prazos de vendas")
+    try:
+        entregas_grupo.checar_posvenda()
+    except Exception:
+        log.exception("erro propondo pós-venda")
     try:
         entregas_grupo.checar_prazos()
     except Exception:
@@ -252,6 +256,7 @@ def _jobs_relatorio(dow: int, hhmm: str) -> list:
     # (tipo, fn, dias_da_semana, inicio, fim)
     JANELAS = [
         ("planejamento", _planejamento_semana_texto, {0}, "08:00", "11:59"),
+        ("vespera_entregas", entregas_grupo.vespera_texto, {0, 1, 2, 3, 4, 5, 6}, "17:00", "20:59"),
         ("agenda", _agenda_manha_texto, {0, 1, 2, 3, 4, 5}, "09:00", "11:59"),
         ("fechamento", _resumo_diario_texto, {0, 1, 2, 3, 4}, "18:00", "21:59"),
         ("fechamento", _resumo_diario_texto, {5}, "15:00", "21:59"),
@@ -261,7 +266,7 @@ def _jobs_relatorio(dow: int, hhmm: str) -> list:
             if tipo in RELATORIOS_ATIVOS and dow in dias and ini <= hhmm <= fim]
 
 
-_SO_DONO = {"agenda", "planejamento"}  # relatórios que vão só pro MEU_NUMERO (os demais vão pra todos)
+_SO_DONO = {"agenda", "planejamento", "vespera_entregas"}  # relatórios que vão só pro MEU_NUMERO (os demais vão pra todos)
 
 
 def _checar_relatorios() -> None:
@@ -279,6 +284,8 @@ def _checar_relatorios() -> None:
             except Exception:
                 pass
             texto = fn()
+            if not texto:  # nada a avisar hoje (ex: sem entregas amanhã)
+                continue
             # Meta Ads anexado ao fechamento (dia) e ao semanal (7d)
             if tipo in ("fechamento", "semanal"):
                 try:

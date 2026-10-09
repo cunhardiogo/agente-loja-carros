@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     trello_key: str = ""
     trello_token: str = ""
     trello_board: str = ""
+    # link de avaliação no Google (vai na mensagem de pós-venda, se configurado)
+    google_review_url: str = ""
     # alternativa à conta de serviço: cliente OAuth + refresh token (autorizado uma vez)
     google_client_id: str = ""
     google_client_secret: str = ""

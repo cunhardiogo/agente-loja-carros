@@ -164,4 +164,43 @@ def sincronizar(aplicar: bool = True) -> list[dict]:
                     c.put(f"/cards/{a['card']['id']}", params=a["mudar"]).raise_for_status()
                 if a["venda"].get("trello_card_id") != a["card"]["id"]:
                     db.update("vendas", {"trello_card_id": a["card"]["id"]}, {"id": f"eq.{a['venda']['id']}"})
+            sincronizar_checklists(c)
     return acoes
+
+
+def itens_preparacao(obs: str | None) -> list[str]:
+    """'Revisar, martelinho na lateral, polir e higienizar' → ['Revisar', 'Martelinho na lateral', 'Polir', 'Higienizar']."""
+    partes = re.split(r"[,;\n]|\s+e\s+(?!(?:o|a|os|as)\s)|\.\s", (obs or "").replace("*", ""))
+    itens = []
+    for p in partes:
+        p = p.strip(" .-")
+        if len(p) >= 3 and p.lower() not in [i.lower() for i in itens]:
+            itens.append(p[0].upper() + p[1:])
+    return itens
+
+
+def sincronizar_checklists(c: httpx.Client) -> int:
+    """O 'o que fazer' de cada entrega aberta vira o checklist 'Preparação para entrega' no cartão do carro.
+    Item novo na lista do grupo é acrescentado; o que a equipe já marcou no Trello fica."""
+    entregas = db.select_all("entregas", {"select": "id,venda_id,observacao,trello_checklist_id,checklist_itens",
+                                          "status": "eq.agendada", "removido": "eq.false", "venda_id": "not.is.null"})
+    cards = {v["id"]: v.get("trello_card_id") for v in db.select_all(
+        "vendas", {"select": "id,trello_card_id", "trello_card_id": "not.is.null"})}
+    n = 0
+    for e in entregas:
+        card = cards.get(e["venda_id"])
+        itens = itens_preparacao(e.get("observacao"))
+        if not card or not itens:
+            continue
+        ja = e.get("checklist_itens") or []
+        novos = [i for i in itens if i not in ja]
+        if not novos:
+            continue
+        chk = e.get("trello_checklist_id")
+        if not chk:
+            chk = c.post(f"/cards/{card}/checklists", params={"name": "Preparação para entrega"}).json()["id"]
+        for item in novos:
+            c.post(f"/checklists/{chk}/checkItems", params={"name": item}).raise_for_status()
+        db.update("entregas", {"trello_checklist_id": chk, "checklist_itens": ja + novos}, {"id": f"eq.{e['id']}"})
+        n += 1
+    return n

@@ -23,6 +23,10 @@ def _pendentes() -> list[dict]:
     for e in db.select("entregas", {"select": "*", "cobranca_status": "eq.proposta"}):
         out.append({"origem": "entrega", "row": e, "codigo": entregas_grupo.codigo(e),
                     "rotulo": f"{e.get('vendedor_nome') or 'vendedor'} — entrega {e.get('veiculo') or '?'} sem data"})
+    for v in db.select("vendas", {"select": "*", "posvenda_status": "eq.proposta"}):
+        out.append({"origem": "posvenda", "row": {**v, "cobranca_texto": v.get("posvenda_texto")},
+                    "codigo": v["id"][:4].upper(),
+                    "rotulo": f"pós-venda — cliente {v.get('cliente_nome') or '?'} ({v.get('modelo') or ''})"})
     return out
 
 
@@ -30,6 +34,9 @@ _MODULO = {"lead": (leads, "leads"), "venda": (vendas_grupo, "vendas"), "entrega
 
 
 def _descartar(p: dict) -> str:
+    if p["origem"] == "posvenda":
+        db.update("vendas", {"posvenda_status": "descartada"}, {"id": f"eq.{p['row']['id']}"})
+        return f"Ok, mensagem de pós-venda #{p['codigo']} descartada."
     modulo, tabela = _MODULO[p["origem"]]
     db.update(tabela, {"cobranca_status": "descartada"}, {"id": f"eq.{p['row']['id']}"})
     modulo.sujo["v"] = True
@@ -41,6 +48,8 @@ def _enviar(p: dict, msg: str) -> str:
         return leads._enviar_cobranca(p["row"], msg)
     if p["origem"] == "entrega":
         return entregas_grupo._enviar(p["row"], msg)
+    if p["origem"] == "posvenda":
+        return entregas_grupo.enviar_posvenda(p["row"], msg)
     return vendas_grupo._enviar(p["row"], msg)
 
 

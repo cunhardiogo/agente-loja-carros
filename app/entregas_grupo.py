@@ -312,3 +312,86 @@ def agenda_do_dia_texto(dia: str | None = None) -> str:
         linhas.append(f"🕐 *{e.get('horario') or 'sem horário'}* — {_carro(e)} · {e.get('vendedor_nome') or '?'}"
                       + (f"\n   🔧 {e['observacao']}" if e.get("observacao") else ""))
     return "\n".join(linhas)
+
+
+# ===== véspera: lembrete pro vendedor e pro dono =====
+def vespera_texto(dia: str | None = None, enviar_vendedores: bool = True) -> str:
+    """Entregas de amanhã: cada vendedor recebe as dele (pela diogo4895) e o dono recebe a lista toda."""
+    from .leads import _ordem_horario
+    amanha = dia or (datas.hoje() + timedelta(days=1)).isoformat()
+    rows = db.select_all("entregas", {"select": "*", "origem": "in.(grupo,planilha)", "status": "eq.agendada",
+                                      "removido": "eq.false", "data_entrega": f"eq.{amanha}"})
+    if not rows:
+        return ""
+    rows.sort(key=lambda e: _ordem_horario(e.get("horario")))
+    dm = f"{amanha[8:10]}/{amanha[5:7]}"
+    linha = lambda e: (f"🕐 *{e.get('horario') or 'sem horário'}* — {_carro(e)}"
+                       + (f"\n   🔧 {e['observacao']}" if e.get("observacao") else ""))
+    if enviar_vendedores:
+        por_vend: dict[str, list] = {}
+        for e in rows:
+            if e.get("vendedor_id"):
+                por_vend.setdefault(e["vendedor_id"], []).append(e)
+        for vid, es in por_vend.items():
+            v = db.select("vendedores", {"select": "nome,telefone", "id": f"eq.{vid}", "limit": "1"})
+            if not v or not v[0].get("telefone"):
+                continue
+            try:
+                evolution.enviar_por_coletor(v[0]["telefone"],
+                                             f"Fala {v[0]['nome']}! Lembrete das suas entregas de amanhã ({dm}):\n\n"
+                                             + "\n".join(linha(e) for e in es)
+                                             + "\n\nDeixa o carro pronto e confirma o horário com o cliente 🙏")
+            except Exception:
+                log.exception("falha enviando lembrete de entrega ao vendedor")
+    return (f"🚗 *Entregas de amanhã ({dm}) — {len(rows)}:*\n"
+            + "\n".join(f"{linha(e)}\n   👤 {e.get('vendedor_nome') or '?'}" for e in rows))
+
+
+# ===== pós-venda: mensagem ao cliente, aprovada pelo dono =====
+POSVENDA_DIAS = 3
+
+
+def texto_posvenda(v: dict) -> str:
+    from .vendas_grupo import nome_carro
+    nome = ((v.get("cliente_nome") or "").split() or [""])[0].title()
+    texto = (f"Olá{' ' + nome if nome else ''}! Aqui é da Grupo SB 🚗 Tudo certo com o seu {nome_carro(v)}? "
+             f"Qualquer coisa que precisar, estamos à disposição.")
+    if settings.google_review_url:
+        texto += f"\n\nSe puder, deixa uma avaliação pra gente no Google, ajuda muito: {settings.google_review_url}"
+    return texto
+
+
+def checar_posvenda(agora: datetime | None = None) -> int:
+    agora = agora or datetime.now(timezone.utc)
+    limite = (agora.astimezone(datas.TZ).date() - timedelta(days=POSVENDA_DIAS)).isoformat()
+    rows = db.select_all("vendas", {"select": "*", "status_entrega": "eq.entregue", "historico": "eq.false",
+                                    "removido": "eq.false", "revenda": "eq.false", "posvenda_status": "is.null",
+                                    "data_entrega_real": f"lte.{limite}"})
+    n = 0
+    for v in rows:
+        if not v.get("cliente_telefone") or (v.get("data_entrega_real") or "") < "2026-10-08":
+            continue  # só entregas a partir do lançamento do pós-venda
+        texto = texto_posvenda(v)
+        cod = v["id"][:4].upper()
+        try:
+            evolution.enviar_texto(settings.meu_numero,
+                                   f"💬 Pós-venda — mensagem pro cliente [#{cod}]\n{v.get('cliente_nome') or '?'} · "
+                                   f"{v.get('modelo') or ''} {v.get('versao') or ''} · entregue em "
+                                   f"{v['data_entrega_real'][8:10]}/{v['data_entrega_real'][5:7]}\n\n\"{texto}\"\n\n"
+                                   f"Responda *ok {cod}* pra enviar · *não {cod}* pra descartar · "
+                                   f"ou *{cod}: texto novo* pra mandar outro texto.")
+        except Exception:
+            log.exception("falha propondo pós-venda")
+            continue
+        db.update("vendas", {"posvenda_status": "proposta", "posvenda_texto": texto,
+                             "posvenda_proposta_em": _iso(agora)}, {"id": f"eq.{v['id']}"})
+        n += 1
+    return n
+
+
+def enviar_posvenda(v: dict, msg: str) -> str:
+    """Sai pelo número da loja (o do agente), que é o que o cliente conhece."""
+    evolution.enviar_texto(v["cliente_telefone"], msg)
+    db.update("vendas", {"posvenda_status": "enviada", "posvenda_texto": msg,
+                         "posvenda_enviada_em": _iso(datetime.now(timezone.utc))}, {"id": f"eq.{v['id']}"})
+    return f"✅ Mensagem de pós-venda enviada pro {v.get('cliente_nome') or 'cliente'}."

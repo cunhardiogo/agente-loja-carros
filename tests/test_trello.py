@@ -21,3 +21,10 @@ def test_nome_do_cartao_novo():
     v = {"modelo": "FIAT", "versao": "Fastback", "ano": 2026, "placa": "TTD9E46"}
     assert trello.nome_cartao(v, "Carlos") == "FASTBACK 2026 (TTD-9E46) - Carlos"
     assert trello.nome_cartao({"modelo": "Xmax 2026", "placa": None}, "Carlos") == "XMAX 2026 - Carlos"
+
+
+def test_itens_da_preparacao():
+    assert trello.itens_preparacao("Revisar, martelinho na lateral, polir e higienizar") == \
+        ["Revisar", "Martelinho na lateral", "Polir", "Higienizar"]
+    assert trello.itens_preparacao("*Trocar o Oleo e o Filtro*, Polimento, Tanque Cheio") == \
+        ["Trocar o Oleo e o Filtro", "Polimento", "Tanque Cheio"]
