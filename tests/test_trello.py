@@ -29,3 +29,11 @@ def test_itens_da_preparacao():
         ["Revisar", "Martelinho na lateral", "Polir", "Higienizar"]
     assert trello.itens_preparacao("*Trocar o Oleo e o Filtro*, Polimento, Tanque Cheio") == \
         ["Trocar o Oleo e o Filtro", "Polimento", "Tanque Cheio"]
+
+
+def test_achar_cartao_modelo_curto_com_numero():
+    listas = {"l1": "estoque sb!"}
+    cards = [{"id": "a", "name": "Citroen C3 2023 (RJN-9H13)", "idList": "l1"},
+             {"id": "b", "name": "Citroen C3 2017 (KRM-8551)", "idList": "l1"}]
+    assert trello.achar_cartao("C3 2023", cards, listas)["id"] == "a"
+    assert trello.achar_cartao("C3", cards, listas) is None

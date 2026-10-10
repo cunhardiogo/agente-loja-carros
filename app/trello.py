@@ -250,7 +250,8 @@ def achar_cartao(texto: str | None, cards: list[dict], listas: dict) -> dict | N
         if len(achados) == 1:
             return achados[0]
     a = _ascii(texto)
-    toks = [t for t in re.split(r"[^a-z0-9]+", a) if (len(t) >= 3 or t.isdigit()) and t not in _GENERICOS]
+    toks = [t for t in re.split(r"[^a-z0-9]+", a)  # "c3", "x1": curtos com número também são modelo
+            if (len(t) >= 3 or any(ch.isdigit() for ch in t)) and t not in _GENERICOS]
     ano = re.search(r"\b(19|20)\d{2}\b", texto)
     modelo = [t for t in toks if not re.fullmatch(r"(19|20)\d{2}", t)]
     if not modelo:

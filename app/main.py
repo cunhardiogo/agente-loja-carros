@@ -7,7 +7,7 @@ from datetime import timedelta
 from fastapi import BackgroundTasks, FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from . import (cobrancas, confirmacao, consulta, entregas_grupo, preparacao_grupo, trello, datas, db, evolution, ingest, leads, media, meta_ads, planilha, sheets,
+from . import (cobrancas, confirmacao, consulta, entregas_grupo, fotos_grupo, preparacao_grupo, trello, datas, db, evolution, ingest, leads, media, meta_ads, planilha, sheets,
                supervisor, vendas_grupo)
 from .config import settings
 
@@ -373,6 +373,8 @@ def _rotear_evento(body: dict) -> dict:
             return entregas_grupo.processar(data)
         if grupo and grupo.get("tipo") == "preparacao":
             return preparacao_grupo.processar(data, instancia, apikey)
+        if grupo and grupo.get("tipo") == "estoque":  # grupo Fotos
+            return fotos_grupo.processar(data, instancia, apikey)
 
     # texto direto OU transcrição de áudio OU leitura de imagem
     texto = media.conteudo_texto(instancia, apikey, data)
