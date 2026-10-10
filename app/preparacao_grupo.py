@@ -108,20 +108,13 @@ def processar(data: dict, instancia: str, apikey: str, historico: bool = False) 
                 continue
             card = trello.achar_cartao(it.get("carro"), cards, listas)
             card_id, card_nome = (card["id"], card["name"]) if card else (None, None)
-            if it["acao"] == "problema":
-                row = db.insert_lock("prep_problemas", {"message_id": f"{mid}#{resumo['problemas']}", "carro_texto": it.get("carro"),
-                                                        "card_id": card_id, "card_nome": card_nome,
-                                                        "descricao": it["descricao"], "autor": autor, "em": _iso(em),
-                                                        "historico": historico})
-                if row and card_id and not historico:
-                    try:
-                        trello.comentar(c, card_id, f"⚠️ Problema relatado por {autor} no grupo de preparação "
-                                                    f"({em.astimezone(datas.TZ):%d/%m}): {it['descricao']}")
-                        db.update("prep_problemas", {"comentado_trello": True}, {"id": f"eq.{row['id']}"})
-                    except Exception:
-                        log.exception("falha comentando problema no Trello")
+            if it["acao"] == "problema":  # defeito também é algo a resolver: vira item do checklist com ⚠️
+                db.insert_lock("prep_problemas", {"message_id": f"{mid}#{resumo['problemas']}", "carro_texto": it.get("carro"),
+                                                  "card_id": card_id, "card_nome": card_nome,
+                                                  "descricao": it["descricao"], "autor": autor, "em": _iso(em),
+                                                  "historico": historico})
                 resumo["problemas"] += 1
-                continue
+                it = {**it, "descricao": f"⚠️ {it['descricao']}", "tipo": "problema"}
             aberta = _tarefa_aberta(it, card_id)
             if it["acao"] == "feito" or it.get("feito"):
                 if aberta:
