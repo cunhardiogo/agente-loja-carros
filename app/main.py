@@ -7,7 +7,7 @@ from datetime import timedelta
 from fastapi import BackgroundTasks, FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from . import (cobrancas, confirmacao, consulta, entregas_grupo, fotos_grupo, preparacao_grupo, trello, datas, db, evolution, ingest, leads, media, meta_ads, planilha, sheets,
+from . import (avaliacoes_grupo, cobrancas, confirmacao, consulta, entregas_grupo, fotos_grupo, preparacao_grupo, trello, datas, db, evolution, ingest, leads, media, meta_ads, planilha, sheets,
                supervisor, vendas_grupo)
 from .config import settings
 
@@ -88,6 +88,10 @@ def _tick_inner() -> None:
     except Exception:
         log.exception("erro checando prazos de vendas")
     try:
+        avaliacoes_grupo.checar()
+    except Exception:
+        log.exception("erro checando avaliações")
+    try:
         preparacao_grupo.checar_paradas()
     except Exception:
         log.exception("erro checando preparação parada")
@@ -103,10 +107,10 @@ def _tick_inner() -> None:
         vendas_grupo.atualizar_descricao()
     except Exception:
         log.exception("erro atualizando descrição do grupo de vendas")
-    mudou = leads.sujo["v"] or vendas_grupo.sujo["v"] or entregas_grupo.sujo["v"]
+    mudou = leads.sujo["v"] or vendas_grupo.sujo["v"] or entregas_grupo.sujo["v"] or avaliacoes_grupo.sujo["v"]
     if mudou or _time.time() - _ult_controle["t"] > 120:  # edições da equipe ~2 min
         _ult_controle["t"] = _time.time()
-        leads.sujo["v"] = vendas_grupo.sujo["v"] = entregas_grupo.sujo["v"] = False
+        leads.sujo["v"] = vendas_grupo.sujo["v"] = entregas_grupo.sujo["v"] = avaliacoes_grupo.sujo["v"] = False
         try:
             sheets.sincronizar_tudo()
         except Exception:
@@ -375,6 +379,8 @@ def _rotear_evento(body: dict) -> dict:
             return preparacao_grupo.processar(data, instancia, apikey)
         if grupo and grupo.get("tipo") == "estoque":  # grupo Fotos
             return fotos_grupo.processar(data, instancia, apikey)
+        if grupo and grupo.get("tipo") == "avaliacoes":
+            return avaliacoes_grupo.processar(data)
 
     # texto direto OU transcrição de áudio OU leitura de imagem
     texto = media.conteudo_texto(instancia, apikey, data)

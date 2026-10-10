@@ -427,9 +427,36 @@ def sincronizar_entregas(c: httpx.Client) -> int:
     return len(rows)
 
 
+# ===== aba Avaliações (só saída) =====
+ABA_AVALIACOES = "Avaliações"
+CAB_AVALIACOES = ["Data", "Vendedor", "Carro", "Ano", "Km", "Placa", "FIPE", "Valor do gestor (como escrito)",
+                  "Valor R$", "% FIPE", "Por", "Cliente quer", "Peças pintadas", "Peças trocar", "Pneus", "Obs",
+                  "Status", "ID"]
+
+
+def sincronizar_avaliacoes(c: httpx.Client) -> int:
+    _garantir_aba(c, ABA_AVALIACOES)
+    planilha = _ler(c, ABA_AVALIACOES)
+    nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
+    rows = db.select_all("avaliacoes", {"select": "*", "origem": "eq.grupo", "avaliado_em": f"gte.{DESDE}",
+                                        "order": "avaliado_em.desc"})
+    valores = [CAB_AVALIACOES]
+    for a in rows:
+        pct = f"{a['valor_avaliacao'] / a['fipe'] * 100:.0f}%" if a.get("valor_avaliacao") and a.get("fipe") else ""
+        valores.append([_fmt_dt(a["avaliado_em"]), nomes.get(a.get("vendedor_id"), ""), a.get("modelo") or "",
+                        str(a.get("ano") or ""), str(a.get("km") or ""), a.get("placa") or "", _num(a.get("fipe")),
+                        a.get("valor_texto") or "", _num(a.get("valor_avaliacao")), pct, a.get("valor_por") or "",
+                        a.get("carro_interesse") or "", a.get("pecas_pintadas") or "", a.get("pecas_trocar") or "",
+                        a.get("pneus") or "", a.get("obs") or "",
+                        "Fechou" if a.get("status") == "fechou" else "Aberta", a["id"]])
+    _escrever_se_mudou(c, ABA_AVALIACOES, CAB_AVALIACOES, planilha, valores)
+    return len(rows)
+
+
 def sincronizar_tudo() -> dict:
     if not configurado():
         return {}
     with _cliente() as c:
         return {"agendamentos": sincronizar_leads(c), "vendas": sincronizar_vendas(c),
-                "entregas": sincronizar_entregas(c), "pagamentos": sincronizar_pagamentos(c)}
+                "entregas": sincronizar_entregas(c), "pagamentos": sincronizar_pagamentos(c),
+                "avaliacoes": sincronizar_avaliacoes(c)}

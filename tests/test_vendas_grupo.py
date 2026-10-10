@@ -193,3 +193,10 @@ def test_ranking_reserva_conta_e_revenda_abaixo_do_tracado(monkeypatch):
     assert "*🥇Yan: 2*\nKwid 2025 - SVN1D97\nPulse Hybrid - TTC8B00" in txt
     assert txt.endswith("➖➖➖➖➖➖➖➖\nRevenda\n\nAsx 2012")
     assert vg.eh_revenda("Asx 2012 vendida pra revenda") and vg._modelo_do_aviso("Asx 2012 vendida pra revenda") == "Asx 2012"
+
+
+def test_resumo_com_carro_na_versao_casa_com_a_reserva(monkeypatch):
+    reserva = {"id": "r1", "modelo": "Xmax 2026", "versao": None, "placa": None, "status_venda": "reservado"}
+    monkeypatch.setattr(vg.db, "select", lambda t, p=None: [reserva])
+    assert vg._venda_aberta_do_vendedor("c", "Yamaha Xmax") is reserva
+    assert vg._venda_aberta_do_vendedor("c", "Yamaha Nmax") is None

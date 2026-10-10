@@ -277,7 +277,8 @@ def _venda_aberta_do_vendedor(vendedor_id: str | None, modelo: str | None) -> di
         return None
     rows = db.select("vendas", {"select": "*", "vendedor_id": f"eq.{vendedor_id}", "removido": "eq.false",
                                 "status_venda": "in.(aguardando_resumo,reservado)", "order": "created_at.desc"})
-    toks = [t for t in _ascii(modelo).split() if len(t) >= 3]
+    toks = [t for t in _ascii(modelo).split()  # marca e ano não identificam o carro
+            if len(t) >= 3 and t not in _MARCAS and not re.fullmatch(r"(19|20)\d{2}", t)]
     for v in rows:
         alvo = _ascii(f"{v.get('modelo') or ''} {v.get('versao') or ''}")
         if toks and any(t in alvo for t in toks):
@@ -359,7 +360,8 @@ def _resumo(texto, mid, autor, em, historico, venda_id: str | None = None) -> di
         existente = db.select("vendas", {"select": "*", "id": f"eq.{venda_id}", "limit": "1"})[0]
     else:
         existente = _venda_por_msg(mid) or _venda_por_placa(campos["placa"]) or \
-            _venda_aberta_do_vendedor(campos["vendedor_id"], campos["modelo"])
+            _venda_aberta_do_vendedor(campos["vendedor_id"],  # "Modelo: Yamaha / Versão: Xmax" — o carro pode estar na versão
+                                      f"{campos['modelo'] or ''} {campos['versao'] or ''}")
     if existente:
         if existente.get("resumo_message_id") == mid:
             if not venda_id:
