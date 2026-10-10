@@ -172,7 +172,10 @@ def checar(agora: datetime | None = None) -> int:
 
 
 def _toks(t: str | None) -> set[str]:
-    return {x for x in re.split(r"[^a-z0-9]+", _ascii(t)) if len(x) >= 3 and not re.fullmatch(r"(19|20)\d{2}", x)}
+    """Palavras que identificam o carro — sem marca ("Volkswagen" casava Virtus com Nivus) e sem ano."""
+    from .vendas_grupo import _MARCAS
+    return {x for x in re.split(r"[^a-z0-9]+", _ascii(t))
+            if len(x) >= 3 and x not in _MARCAS and not re.fullmatch(r"(19|20)\d{2}", x)}
 
 
 def ligar_vendas() -> int:
@@ -182,14 +185,16 @@ def ligar_vendas() -> int:
     if not abertas:
         return 0
     vendas = db.select_all("vendas", {"select": "id,vendedor_id,troca_modelo,troca_placa,data_venda,status_venda",
-                                      "removido": "eq.false", "troca_modelo": "not.is.null",
+                                      "removido": "eq.false", "troca_modelo": "not.is.null", "origem": "eq.grupo",
                                       "status_venda": "in.(completa,aguardando_resumo)"})
     usadas = {a["venda_id"] for a in db.select_all("avaliacoes", {"select": "venda_id", "venda_id": "not.is.null"})}
     n = 0
     for v in vendas:
         if v["id"] in usadas:
             continue
-        cands = [a for a in abertas if (v.get("troca_placa") and a.get("placa") == v["troca_placa"])
+        # a venda tem que ser do mesmo período: no dia da avaliação ou depois
+        recentes = [a for a in abertas if (v.get("data_venda") or "") >= (a.get("avaliado_em") or "")[:10]]
+        cands = [a for a in recentes if (v.get("troca_placa") and a.get("placa") == v["troca_placa"])
                  or (a.get("vendedor_id") == v.get("vendedor_id") and _toks(a.get("modelo")) & _toks(v.get("troca_modelo")))]
         if len(cands) != 1:
             continue
