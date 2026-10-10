@@ -890,6 +890,13 @@ def _fmt_data_sp(iso: str) -> str:
 
 
 DISPATCH = {
+    "corrigir_lead": lambda **k: __import__("app.acoes", fromlist=["x"]).corrigir_lead(**k),
+    "corrigir_entrega": lambda **k: __import__("app.acoes", fromlist=["x"]).corrigir_entrega(**k),
+    "valor_avaliacao": lambda **k: __import__("app.acoes", fromlist=["x"]).valor_avaliacao(**k),
+    "placa_venda": lambda **k: __import__("app.acoes", fromlist=["x"]).placa_venda(**k),
+    "tarefa_preparacao": lambda **k: __import__("app.acoes", fromlist=["x"]).tarefa_preparacao(**k),
+    "mover_cartao": lambda **k: __import__("app.acoes", fromlist=["x"]).mover_cartao(**k),
+    "criar_cartao": lambda **k: __import__("app.acoes", fromlist=["x"]).criar_cartao(**k),
     "a_receber_vendas": a_receber_vendas,
     "marcar_venda_caiu": marcar_venda_caiu,
     "vendas_pendentes": vendas_pendentes,
@@ -940,6 +947,55 @@ _DI = {"type": "string", "description": "Data início ISO YYYY-MM-DD (opcional, 
 _DF = {"type": "string", "description": "Data fim ISO YYYY-MM-DD (opcional)"}
 
 TOOLS = [
+    {"type": "function", "function": {
+        "name": "corrigir_lead",
+        "description": "AÇÃO: corrigir um lead do grupo de agendamento (vendedor, data, horário, status, tipo, observação, telefone). Ex.: 'o lead do Jairo é do Edson', 'o Gerson remarcou pra sexta 15h', 'o lead da Vera não veio'.",
+        "parameters": {"type": "object", "properties": {
+            "termo": {"type": "string", "description": "nome do cliente, carro ou telefone p/ achar o lead"},
+            "vendedor": {"type": "string"}, "data": {"type": "string", "description": "dd/mm/aaaa"},
+            "horario": {"type": "string"}, "status": {"type": "string", "description": "Vendido, Não veio, Cancelado, Negociando, Compareceu, Remarcado (dd/mm/aaaa)..."},
+            "tipo": {"type": "string", "enum": ["Visita", "Negociação telefone", "Turno"]},
+            "observacao": {"type": "string"}, "telefone": {"type": "string"}}, "required": ["termo"]},
+    }},
+    {"type": "function", "function": {
+        "name": "corrigir_entrega",
+        "description": "AÇÃO: corrigir uma entrega do quadro (data, horário, o que fazer no carro) ou marcar como entregue. Ex.: 'a entrega do Fit é dia 15 às 10h', 'o Kwid foi entregue'.",
+        "parameters": {"type": "object", "properties": {
+            "termo": {"type": "string", "description": "carro ou vendedor"}, "data": {"type": "string", "description": "dd/mm/aaaa"},
+            "horario": {"type": "string"}, "observacao": {"type": "string"}, "entregue": {"type": "boolean"}},
+            "required": ["termo"]},
+    }},
+    {"type": "function", "function": {
+        "name": "valor_avaliacao",
+        "description": "AÇÃO: registrar o valor de uma avaliação (do grupo de avaliações). Guarde EXATAMENTE como o dono escreveu. Ex.: 'a avaliação do Corolla foi 60', 'Virtus: pago 38, oferece 42'.",
+        "parameters": {"type": "object", "properties": {"termo": {"type": "string", "description": "carro avaliado (modelo, ano ou placa)"},
+                                                         "valor": {"type": "string"}}, "required": ["termo", "valor"]},
+    }},
+    {"type": "function", "function": {
+        "name": "placa_venda",
+        "description": "AÇÃO: corrigir a placa de um carro vendido — atualiza a venda, a planilha e o nome do cartão no Trello. Ex.: 'a placa da Xmax do Carlos é TUL-5J38'.",
+        "parameters": {"type": "object", "properties": {"termo": {"type": "string", "description": "carro, cliente ou vendedor"},
+                                                         "placa": {"type": "string"}}, "required": ["termo", "placa"]},
+    }},
+    {"type": "function", "function": {
+        "name": "tarefa_preparacao",
+        "description": "AÇÃO: mexer no checklist de preparação de um carro no Trello. acao='adicionar' (nova tarefa), 'concluir' (marcar feito) ou 'remover' (tirar — pede confirmação). Ex.: 'Kicks: acrescenta trocar pastilha', 'marca o freio do Kicks como feito', 'tira o polir farol do Gol'.",
+        "parameters": {"type": "object", "properties": {"carro": {"type": "string", "description": "carro como no Trello (modelo, ano ou placa)"},
+                                                         "acao": {"type": "string", "enum": ["adicionar", "concluir", "remover"]},
+                                                         "descricao": {"type": "string"}}, "required": ["carro", "acao", "descricao"]},
+    }},
+    {"type": "function", "function": {
+        "name": "mover_cartao",
+        "description": "AÇÃO: mover o cartão de um carro no Trello para outra lista (estoque, trânsito, pintura, mecânico, preparação/foto, vendidos, recall, finalizado). Pede confirmação. Ex.: 'move o Civic pra pintura'.",
+        "parameters": {"type": "object", "properties": {"carro": {"type": "string"}, "lista": {"type": "string"}},
+                       "required": ["carro", "lista"]},
+    }},
+    {"type": "function", "function": {
+        "name": "criar_cartao",
+        "description": "AÇÃO: criar o cartão de um carro no Trello, no padrão 'Marca Modelo Ano (XXX-XXXX)'. Pede confirmação. Ex.: 'cria o cartão do Compass 2023 RKC-8D02 em estoque'.",
+        "parameters": {"type": "object", "properties": {"nome": {"type": "string", "description": "já no padrão Marca Modelo Ano (Placa)"},
+                                                         "lista": {"type": "string"}}, "required": ["nome"]},
+    }},
     {"type": "function", "function": {
         "name": "a_receber_vendas",
         "description": "Quanto falta receber das vendas (de outubro/2026 em diante, sem revenda): total, quanto vem de financiamento bancário e quanto é à vista (consórcio conta como à vista), venda por venda. Pago = comprovantes postados no grupo de vendas.",
@@ -1209,6 +1265,7 @@ LEMBRETES: criar_lembrete quando o dono pedir p/ ser lembrado (calcule 'quando' 
 SUPERVISOR: você é proativo. radar mostra os alertas abertos (carro encalhado, a receber parado, entrega atrasada, comparecimento baixo, sistema fora) — use quando perguntarem 'o que preciso resolver?'/'como está a operação?', e resolver_alerta p/ baixar um. anotar salva recado livre sem horário; listar_notas/resolver_nota gerenciam. pendências (listar_pendencias) mostra o que aguarda sua confirmação.
 SECRETÁRIA (assistido — você organiza, o DONO contata): lista_ligar_hoje dá quem ligar hoje (faltas de ontem, reservas paradas, entrega atrasada, a receber) com telefone — use em 'quem preciso contatar?'/'tem alguém pra ligar?'. mensagem_cobranca monta um texto pronto e educado de cobrança pra um cliente com saldo (ex 'manda uma cobrança pro João'); ENTREGUE o texto pro dono copiar/encaminhar e deixe claro que ele revisa e envia — você NUNCA manda direto pro cliente.
 LEADS (grupo Agendamento SDR — fonte oficial de visitas e negociações por telefone): use leads_abertos, buscar_lead e resumo_leads para qualquer pergunta sobre agendamentos, leads, SDRs, retorno de vendedor e cobranças. Tipos: Visita (horário na loja), Negociação telefone, Turno (horário e vendedor definidos).
+CORREÇÕES PELO DONO: corrigir_lead, corrigir_entrega, valor_avaliacao, placa_venda, tarefa_preparacao (adicionar/concluir/remover), mover_cartao, criar_cartao, atualizar_venda, marcar_venda_caiu. Planilha e descrição do grupo se atualizam sozinhas. Quando a ferramenta devolver precisa_confirmar, diga ao dono exatamente o que vai ser feito e peça "ok" ou "não" — não diga que já fez. Se achar mais de um registro, mostre as opções e pergunte qual.
 COBRANÇAS A VENDEDORES: o agente ENVIA sim, pelo número do dono, depois da aprovação. Se o dono pedir para mandar mensagem/cobrança a um vendedor, NÃO diga que não envia: explique que basta responder à cobrança pendente com 'ok CÓDIGO', 'não CÓDIGO' ou 'texto novo: <mensagem>'.
 VENDAS do grupo: vendas_pendentes (sem resumo, resumo incompleto, reservas) e buscar_venda (detalhe de uma venda com comprovantes de pagamento).
 

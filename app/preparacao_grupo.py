@@ -1,5 +1,5 @@
 """Grupo PREPARAÇÃO: pedidos e "Missões" viram tarefas por carro (checklist "Preparação" no cartão do Trello),
-✓ / "feito" fecha a tarefa, problema encontrado no carro fica registrado (comentário no cartão).
+✓ / "feito" fecha a tarefa, problema encontrado no carro vira item do checklist com ⚠️; mensagem editada acerta o checklist.
 Tarefa parada há 2 dias → recado pro Felipe cobrar (com cópia pro dono)."""
 import json
 import logging
@@ -71,8 +71,9 @@ def processar(data: dict, instancia: str, apikey: str, historico: bool = False) 
     key = data.get("key") or {}
     mid = key.get("id")
     msg = data.get("message") or {}
-    if msg.get("protocolMessage"):
-        return {"ignored": "protocolo"}
+    pm = msg.get("protocolMessage")
+    if pm:
+        return _edicao(pm, data) if pm.get("editedMessage") else {"ignored": "protocolo"}
     texto = _texto(msg)
     img = None
     if msg.get("imageMessage"):
@@ -104,36 +105,78 @@ def processar(data: dict, instancia: str, apikey: str, historico: bool = False) 
     with trello._cliente() as c:
         cards, listas = trello.cartoes(c) if trello.configurado() else ([], {})
         for it in itens:
-            if it.get("acao") == "info" or not it.get("descricao"):
+            _aplicar(it, mid, em, autor, responsavel, historico, c, cards, listas, resumo)
+    return resumo
+
+
+def _aplicar(it, mid, em, autor, responsavel, historico, c, cards, listas, resumo) -> tuple | None:
+    """Um item extraído → tarefa (com item no checklist do cartão). Devolve (card_id, descrição) do item."""
+    if it.get("acao") == "info" or not it.get("descricao"):
+        return None
+    card = trello.achar_cartao(it.get("carro"), cards, listas)
+    card_id, card_nome = (card["id"], card["name"]) if card else (None, None)
+    if it["acao"] == "problema":  # defeito também é algo a resolver: vira item do checklist com ⚠️
+        db.insert_lock("prep_problemas", {"message_id": f"{mid}#{resumo['problemas']}#{_ascii(it['descricao'])[:30]}",
+                                          "carro_texto": it.get("carro"), "card_id": card_id, "card_nome": card_nome,
+                                          "descricao": it["descricao"], "autor": autor, "em": _iso(em),
+                                          "historico": historico})
+        resumo["problemas"] += 1
+        it = {**it, "descricao": f"⚠️ {it['descricao']}", "tipo": "problema"}
+    aberta = _tarefa_aberta(it, card_id)
+    if it["acao"] == "feito" or it.get("feito"):
+        if aberta:
+            _concluir(aberta, em, historico, c)
+            resumo["feitas"] += 1
+        return card_id, it["descricao"]
+    if aberta:
+        return card_id, it["descricao"]  # lista de Missões repostada: a tarefa já existe
+    t = db.insert("prep_tarefas", {"message_id": mid, "carro_texto": it.get("carro"), "card_id": card_id,
+                                   "card_nome": card_nome, "tipo": it.get("tipo") or "outro",
+                                   "descricao": it["descricao"], "responsavel": responsavel,
+                                   "criado_em": _iso(em), "historico": historico})
+    if card_id and not historico:
+        try:
+            item_id = trello.item_checklist(c, card_id, it["descricao"])
+            db.update("prep_tarefas", {"checklist_item_id": item_id}, {"id": f"eq.{t['id']}"})
+        except Exception:
+            log.exception("falha criando item no Trello")
+    resumo["tarefas"] += 1
+    return card_id, it["descricao"]
+
+
+def _edicao(pm: dict, data: dict) -> dict:
+    """Mensagem editada: relê o texto e acerta o checklist — item novo entra, item que sumiu sai
+    (se ainda não foi feito). Item com texto alterado sai e entra com o texto novo."""
+    alvo = (pm.get("key") or {}).get("id")
+    texto = _texto(pm.get("editedMessage") or {})
+    antigas = db.select_all("prep_tarefas", {"select": "*", "message_id": f"eq.{alvo}"}) if alvo else []
+    if not texto or not antigas:
+        return {"ignored": "edicao_sem_tarefas"}
+    try:
+        itens = extrair(texto)
+    except Exception:
+        log.exception("falha extraindo edição da preparação")
+        return {"erro": "extracao"}
+    em = _dt(antigas[0]["criado_em"])
+    resumo = {"tarefas": 0, "feitas": 0, "problemas": 0, "removidas": 0}
+    with trello._cliente() as c:
+        cards, listas = trello.cartoes(c)
+        vigentes = [r for it in itens if (r := _aplicar(it, alvo, em, _pessoa(None, data), antigas[0].get("responsavel"),
+                                                        antigas[0].get("historico", False), c, cards, listas, resumo))]
+        for t in antigas:
+            if t["status"] != "pendente":
                 continue
-            card = trello.achar_cartao(it.get("carro"), cards, listas)
-            card_id, card_nome = (card["id"], card["name"]) if card else (None, None)
-            if it["acao"] == "problema":  # defeito também é algo a resolver: vira item do checklist com ⚠️
-                db.insert_lock("prep_problemas", {"message_id": f"{mid}#{resumo['problemas']}", "carro_texto": it.get("carro"),
-                                                  "card_id": card_id, "card_nome": card_nome,
-                                                  "descricao": it["descricao"], "autor": autor, "em": _iso(em),
-                                                  "historico": historico})
-                resumo["problemas"] += 1
-                it = {**it, "descricao": f"⚠️ {it['descricao']}", "tipo": "problema"}
-            aberta = _tarefa_aberta(it, card_id)
-            if it["acao"] == "feito" or it.get("feito"):
-                if aberta:
-                    _concluir(aberta, em, historico, c)
-                    resumo["feitas"] += 1
+            ainda = any((card_id == t.get("card_id") or not card_id) and _parecida(desc, t["descricao"])
+                        for card_id, desc in vigentes)
+            if ainda:
                 continue
-            if aberta:
-                continue  # lista de Missões repostada: a tarefa já existe
-            t = db.insert("prep_tarefas", {"message_id": mid, "carro_texto": it.get("carro"), "card_id": card_id,
-                                           "card_nome": card_nome, "tipo": it.get("tipo") or "outro",
-                                           "descricao": it["descricao"], "responsavel": responsavel,
-                                           "criado_em": _iso(em), "historico": historico})
-            if card_id and not historico:
+            if t.get("card_id") and t.get("checklist_item_id"):
                 try:
-                    item_id = trello.item_checklist(c, card_id, it["descricao"])
-                    db.update("prep_tarefas", {"checklist_item_id": item_id}, {"id": f"eq.{t['id']}"})
+                    trello.remover_item(c, t["card_id"], t["checklist_item_id"])
                 except Exception:
-                    log.exception("falha criando item no Trello")
-            resumo["tarefas"] += 1
+                    log.exception("falha removendo item do Trello")
+            db.delete("prep_tarefas", {"id": f"eq.{t['id']}"})
+            resumo["removidas"] += 1
     return resumo
 
 

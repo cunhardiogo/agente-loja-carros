@@ -100,7 +100,16 @@ def processar(data: dict, historico: bool = False) -> dict:
     from .vendas_grupo import vendedor_por_lid
     key = data.get("key") or {}
     msg = data.get("message") or {}
-    if msg.get("protocolMessage"):
+    pm = msg.get("protocolMessage")
+    if pm:  # formulário editado pelo vendedor (corrigiu km, FIPE, placa...) atualiza a avaliação
+        editado = _texto(pm.get("editedMessage") or {})
+        alvo = (pm.get("key") or {}).get("id")
+        if editado and alvo and eh_formulario(editado):
+            r = db.update("avaliacoes", {**parse_formulario(editado), "texto_original": editado},
+                          {"message_id": f"eq.{alvo}"})
+            if r:
+                sujo["v"] = True
+                return {"editada": r[0]["id"]}
         return {"ignored": "protocolo"}
     texto = _texto(msg)
     if not texto:

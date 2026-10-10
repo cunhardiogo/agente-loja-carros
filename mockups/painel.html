@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Painel Grupo SB — mockup</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,0.10);
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+    --seq-250: #86b6ef; --seq-350: #5598e7; --seq-450: #2a78d6; --seq-550: #1c5cab; --seq-650: #104281;
+    --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b; --good-text: #006300;
+    --neutral: #f0efec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+      --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+      --seq-250: #86b6ef; --seq-350: #5598e7; --seq-450: #3987e5; --seq-550: #256abf; --seq-650: #184f95;
+      --good-text: #0ca30c; --neutral: #383835;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --seq-250: #86b6ef; --seq-350: #5598e7; --seq-450: #3987e5; --seq-550: #256abf; --seq-650: #184f95;
+    --good-text: #0ca30c; --neutral: #383835;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; padding: 16px 24px; border-bottom: 1px solid var(--ring); flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 650; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  .grow { flex: 1; }
+  .tabs { display: flex; gap: 4px; padding: 12px 24px 0; flex-wrap: wrap; }
+  .tab { border: 1px solid var(--ring); background: transparent; color: var(--ink-2); padding: 7px 14px; border-radius: 999px; cursor: pointer; font: inherit; }
+  .tab[aria-selected="true"] { background: var(--ink); color: var(--page); border-color: var(--ink); }
+  select, .btn { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--ring); border-radius: 8px; padding: 6px 10px; }
+  .btn { cursor: pointer; }
+  main { padding: 16px 24px 48px; }
+  .page { display: none; } .page.on { display: block; }
+  .grid { display: grid; gap: 16px; }
+  .g4 { grid-template-columns: repeat(4, minmax(0,1fr)); }
+  .g3 { grid-template-columns: repeat(3, minmax(0,1fr)); }
+  .g2 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  @media (max-width: 1100px) { .g4 { grid-template-columns: repeat(2, minmax(0,1fr)); } .g3, .g2 { grid-template-columns: 1fr; } }
+  @media (max-width: 560px) { main, header, .tabs { padding-left: 16px; padding-right: 16px; } .g4 { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--ring); border-radius: 12px; padding: 16px; min-width: 0; }
+  .card h2 { font-size: 14px; margin: 0 0 2px; font-weight: 650; }
+  .card .desc { color: var(--muted); font-size: 12px; margin: 0 0 12px; }
+  .tile .lbl { color: var(--ink-2); font-size: 13px; }
+  .tile .val { font-size: 30px; font-weight: 650; margin: 4px 0 2px; letter-spacing: -0.01em; }
+  .tile .meta { color: var(--muted); font-size: 12px; }
+  .bar { height: 6px; background: var(--neutral); border-radius: 4px; margin-top: 10px; overflow: hidden; }
+  .bar > span { display: block; height: 100%; background: var(--s1); border-radius: 4px; }
+  .delta-good { color: var(--good-text); } .delta-bad { color: var(--critical); }
+  .status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  td { padding: 8px; border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.num, th.num { text-align: right; }
+  .scroll { overflow-x: auto; }
+  .alert { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--grid); align-items: flex-start; }
+  .alert:last-child { border-bottom: 0; }
+  .alert .ico { font-size: 14px; line-height: 20px; }
+  .alert b { font-weight: 600; }
+  .alert small { color: var(--muted); display: block; }
+  svg text { fill: var(--muted); font-size: 11px; font-family: system-ui, sans-serif; }
+  svg .lbl-ink { fill: var(--ink-2); font-size: 12px; }
+  #tip { position: fixed; pointer-events: none; background: var(--ink); color: var(--page); font-size: 12px; padding: 6px 9px; border-radius: 6px; opacity: 0; transition: opacity .08s; z-index: 10; white-space: nowrap; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--ink-2); margin-bottom: 8px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+  .pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--ring); color: var(--ink-2); }
+  .mock { font-size: 12px; color: var(--muted); border: 1px dashed var(--axis); padding: 4px 10px; border-radius: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Painel Grupo SB</h1>
+    <div class="sub">Brutus · Soberano — dados fictícios para visualizar o layout</div>
+  </div>
+  <div class="grow"></div>
+  <span class="mock">MOCKUP</span>
+  <select aria-label="Período"><option>Outubro / 2026</option><option>Últimos 30 dias</option><option>Semana atual</option></select>
+  <select aria-label="Loja"><option>Todas as lojas</option><option>Brutus</option><option>Soberano</option></select>
+  <button class="btn" id="tema" type="button">Tema</button>
+</header>
+<nav class="tabs" role="tablist">
+  <button class="tab" role="tab" aria-selected="true" data-p="dono">Visão do dono</button>
+  <button class="tab" role="tab" aria-selected="false" data-p="equipe">Equipe</button>
+  <button class="tab" role="tab" aria-selected="false" data-p="funil">Funil & marketing</button>
+  <button class="tab" role="tab" aria-selected="false" data-p="estoque">Estoque & operação</button>
+  <button class="tab" role="tab" aria-selected="false" data-p="compra">Avaliações & recall</button>
+</nav>
+<main>
+
+<!-- ============ VISÃO DO DONO ============ -->
+<section class="page on" id="dono">
+  <div class="grid g4" style="margin-bottom:16px">
+    <div class="card tile"><div class="lbl">Carros vendidos</div><div class="val">24</div>
+      <div class="meta">meta 30 · ritmo previsto <b>31</b> <span class="delta-good">▲ no ritmo</span></div>
+      <div class="bar"><span style="width:80%"></span></div></div>
+    <div class="card tile"><div class="lbl">Faturamento</div><div class="val">R$ 1,62 mi</div>
+      <div class="meta">ticket médio R$ 67,5 mil · meta R$ 2,0 mi</div>
+      <div class="bar"><span style="width:81%"></span></div></div>
+    <div class="card tile"><div class="lbl">Margem bruta</div><div class="val">R$ 214 mil</div>
+      <div class="meta">13,2% · <span class="delta-good">▲ 1,1 p.p.</span> vs setembro</div></div>
+    <div class="card tile"><div class="lbl">A receber</div><div class="val">R$ 383 mil</div>
+      <div class="meta">financiamento R$ 124 mil · à vista R$ 259 mil</div></div>
+  </div>
+  <div class="grid g3" style="margin-bottom:16px">
+    <div class="card" style="grid-column: span 2">
+      <h2>Vendas acumuladas no mês</h2><p class="desc">Realizado contra o ritmo necessário para bater a meta de 30</p>
+      <div class="legend"><span><i style="background:var(--s1)"></i>Realizado</span><span><i style="background:var(--muted)"></i>Ritmo da meta (tracejado)</span></div>
+      <div id="ch-acum"></div>
+    </div>
+    <div class="card">
+      <h2>Alertas de hoje</h2><p class="desc">O que precisa de ação</p>
+      <div class="alert"><span class="ico" style="color:var(--critical)">●</span><div><b>12 leads sem retorno</b> há mais de 1 h<small>Yan 5 · Edson 4 · Carlos 3</small></div></div>
+      <div class="alert"><span class="ico" style="color:var(--serious)">●</span><div><b>3 resumos de venda atrasados</b><small>HR-V, Palio, Onix (revenda)</small></div></div>
+      <div class="alert"><span class="ico" style="color:var(--warning)">●</span><div><b>2 entregas sem data</b> no quadro<small>Sentra 2024 · Kwid 2025</small></div></div>
+      <div class="alert"><span class="ico" style="color:var(--warning)">●</span><div><b>7 carros há mais de 60 dias</b> no estoque<small>R$ 612 mil parados</small></div></div>
+      <div class="alert"><span class="ico" style="color:var(--good)">●</span><div><b>Comparecimento 64%</b> na semana<small>acima da meta de 60%</small></div></div>
+    </div>
+  </div>
+  <div class="grid g2">
+    <div class="card"><h2>Funil do mês</h2><p class="desc">Do lead ao carro entregue</p><div id="ch-funil"></div></div>
+    <div class="card"><h2>Vendas por canal de origem</h2><p class="desc">Onde nasce a venda (portal informado no resumo)</p><div id="ch-canal"></div></div>
+  </div>
+</section>
+
+<!-- ============ EQUIPE ============ -->
+<section class="page" id="equipe">
+  <div class="card" style="margin-bottom:16px">
+    <h2>Placar dos vendedores</h2><p class="desc">Resultado e disciplina — mesmo critério para todos</p>
+    <div class="scroll"><table>
+      <thead><tr><th>Vendedor</th><th class="num">Vendas</th><th class="num">Meta</th><th class="num">% meta</th><th class="num">Faturamento</th><th class="num">Conversão lead→venda</th><th class="num">Retorno ≤ 30 min</th><th class="num">Resumo no prazo</th><th class="num">Avaliações</th><th class="num">Recall</th></tr></thead>
+      <tbody id="tb-equipe"></tbody>
+    </table></div>
+  </div>
+  <div class="grid g2">
+    <div class="card"><h2>Vendas × meta por vendedor</h2><p class="desc">Barra = realizado · marca = meta individual</p><div id="ch-meta"></div></div>
+    <div class="card"><h2>Tempo médio de retorno ao lead (min)</h2><p class="desc">Negociação por telefone · meta 30 min</p><div id="ch-retorno"></div></div>
+  </div>
+</section>
+
+<!-- ============ FUNIL & MARKETING ============ -->
+<section class="page" id="funil">
+  <div class="grid g4" style="margin-bottom:16px">
+    <div class="card tile"><div class="lbl">Leads no mês</div><div class="val">186</div><div class="meta">Renata 92 · Mário 94</div></div>
+    <div class="card tile"><div class="lbl">Comparecimento às visitas</div><div class="val">58%</div><div class="meta">meta 60% · <span class="delta-bad">▼ 4 p.p.</span></div></div>
+    <div class="card tile"><div class="lbl">Custo por lead (Meta Ads)</div><div class="val">R$ 58</div><div class="meta">R$ 5.400 investidos</div></div>
+    <div class="card tile"><div class="lbl">Custo por venda (tráfego)</div><div class="val">R$ 675</div><div class="meta">8 vendas vindas do tráfego</div></div>
+  </div>
+  <div class="grid g2">
+    <div class="card"><h2>Leads por canal e conversão</h2><p class="desc">Volume de leads e quantos viraram venda</p>
+      <div class="legend"><span><i style="background:var(--s1)"></i>Leads</span><span><i style="background:var(--s2)"></i>Vendas</span></div>
+      <div id="ch-canal-leads"></div></div>
+    <div class="card"><h2>Leads por dia</h2><p class="desc">Visita × negociação por telefone</p>
+      <div class="legend"><span><i style="background:var(--s1)"></i>Visita</span><span><i style="background:var(--s2)"></i>Negociação telefone</span></div>
+      <div id="ch-leads-dia"></div></div>
+  </div>
+</section>
+
+<!-- ============ ESTOQUE & OPERAÇÃO ============ -->
+<section class="page" id="estoque">
+  <div class="grid g4" style="margin-bottom:16px">
+    <div class="card tile"><div class="lbl">Carros em estoque</div><div class="val">67</div><div class="meta">R$ 5,4 mi em estoque</div></div>
+    <div class="card tile"><div class="lbl">Giro médio</div><div class="val">38 dias</div><div class="meta">meta ≤ 45 dias</div></div>
+    <div class="card tile"><div class="lbl">Da chegada até a foto</div><div class="val">9,5 dias</div><div class="meta">preparação 7,2 · foto 2,3</div></div>
+    <div class="card tile"><div class="lbl">Da venda até a entrega</div><div class="val">3,4 dias</div><div class="meta">meta ≤ 5 dias · 1 atrasada</div></div>
+  </div>
+  <div class="grid g2" style="margin-bottom:16px">
+    <div class="card"><h2>Idade do estoque</h2><p class="desc">Quantos carros em cada faixa de dias parados</p><div id="ch-idade"></div></div>
+    <div class="card"><h2>Onde estão os carros agora</h2><p class="desc">Etapas do quadro do Trello</p><div id="ch-etapas"></div></div>
+  </div>
+  <div class="card">
+    <h2>Carros mais parados</h2><p class="desc">Candidatos a revisão de preço</p>
+    <div class="scroll"><table><thead><tr><th>Carro</th><th class="num">Dias em estoque</th><th class="num">Preço</th><th class="num">FIPE</th><th>Etapa</th><th>Situação</th></tr></thead><tbody id="tb-parados"></tbody></table></div>
+  </div>
+</section>
+
+<!-- ============ AVALIAÇÕES & RECALL ============ -->
+<section class="page" id="compra">
+  <div class="grid g4" style="margin-bottom:16px">
+    <div class="card tile"><div class="lbl">Avaliações no mês</div><div class="val">42</div><div class="meta">Yan 18 · Edson 12 · Vinicius 7 · Carlos 5</div></div>
+    <div class="card tile"><div class="lbl">Valor avaliado / FIPE</div><div class="val">69%</div><div class="meta">mediana · faixa-alvo 65–75%</div></div>
+    <div class="card tile"><div class="lbl">Avaliações que viraram troca</div><div class="val">19%</div><div class="meta">8 de 42</div></div>
+    <div class="card tile"><div class="lbl">Recall (vendas dos últimos 90 dias)</div><div class="val">6,7%</div><div class="meta">5 de 75 · meta &lt; 10%</div></div>
+  </div>
+  <div class="grid g2">
+    <div class="card"><h2>Avaliado em % da FIPE</h2><p class="desc">Cada ponto é uma avaliação · faixa-alvo sombreada</p><div id="ch-fipe"></div></div>
+    <div class="card"><h2>Motivos de recall</h2><p class="desc">Últimos 90 dias</p><div id="ch-recall"></div></div>
+  </div>
+</section>
+</main>
+<div id="tip" role="tooltip"></div>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const brl = (n) => "R$ " + n.toLocaleString("pt-BR");
+const tip = $("#tip");
+function hover(el, html) {
+  el.addEventListener("mousemove", (e) => { tip.innerHTML = html; tip.style.opacity = 1; tip.style.left = (e.clientX + 12) + "px"; tip.style.top = (e.clientY - 34) + "px"; });
+  el.addEventListener("mouseleave", () => tip.style.opacity = 0);
+}
+const NS = "http://www.w3.org/2000/svg";
+function svg(w, h) { const s = document.createElementNS(NS, "svg"); s.setAttribute("viewBox", `0 0 ${w} ${h}`); s.setAttribute("width", "100%"); s.style.display = "block"; return s; }
+function el(tag, attrs, parent) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+function txt(parent, x, y, t, attrs = {}) { const e = el("text", { x, y, ...attrs }, parent); e.textContent = t; return e; }
+// barra com cantos de 4px só na ponta de dado
+function hbar(parent, x, y, w, h, fill) {
+  const r = Math.min(4, w / 2, h / 2);
+  return el("path", { d: `M${x},${y} H${x + w - r} Q${x + w},${y} ${x + w},${y + r} V${y + h - r} Q${x + w},${y + h} ${x + w - r},${y + h} H${x} Z`, fill }, parent);
+}
+function vbar(parent, x, y, w, h, fill) {
+  const r = Math.min(4, w / 2, h / 2);
+  return el("path", { d: `M${x},${y + h} V${y + r} Q${x},${y} ${x + r},${y} H${x + w - r} Q${x + w},${y} ${x + w},${y + r} V${y + h} Z`, fill }, parent);
+}
+
+/* ---------- linha: vendas acumuladas × ritmo da meta ---------- */
+(function () {
+  const dias = 31, hoje = 24, meta = 30;
+  const diario = [1,0,2,1,1,0,3,1,0,1,2,1,0,1,2,1,1,0,2,1,1,0,1,1];
+  let acc = 0; const real = diario.map(d => acc += d);
+  const W = 640, H = 230, L = 32, R = 16, T = 12, B = 26, s = svg(W, H);
+  const x = d => L + (d - 1) / (dias - 1) * (W - L - R), y = v => T + (1 - v / 32) * (H - T - B);
+  [0, 10, 20, 30].forEach(v => { el("line", { x1: L, x2: W - R, y1: y(v), y2: y(v), stroke: "var(--grid)" }, s); txt(s, L - 6, y(v) + 4, v, { "text-anchor": "end" }); });
+  [1, 8, 15, 22, 31].forEach(d => txt(s, x(d), H - 8, String(d).padStart(2, "0") + "/10", { "text-anchor": "middle" }));
+  el("line", { x1: x(1), y1: y(meta / dias), x2: x(dias), y2: y(meta), stroke: "var(--muted)", "stroke-width": 2, "stroke-dasharray": "5 5" }, s);
+  el("polyline", { points: real.map((v, i) => `${x(i + 1)},${y(v)}`).join(" "), fill: "none", stroke: "var(--s1)", "stroke-width": 2, "stroke-linejoin": "round" }, s);
+  el("circle", { cx: x(hoje), cy: y(real[hoje - 1]), r: 5, fill: "var(--s1)", stroke: "var(--surface)", "stroke-width": 2 }, s);
+  txt(s, x(hoje) - 8, y(real[hoje - 1]) - 10, `${real[hoje - 1]} vendidos`, { class: "lbl-ink", "text-anchor": "end" });
+  txt(s, x(dias) - 4, y(meta) - 8, "meta 30", { class: "lbl-ink", "text-anchor": "end" });
+  // crosshair
+  const cross = el("line", { y1: T, y2: H - B, stroke: "var(--axis)", opacity: 0 }, s);
+  const hit = el("rect", { x: L, y: T, width: W - L - R, height: H - T - B, fill: "transparent" }, s);
+  hit.addEventListener("mousemove", (e) => {
+    const r = s.getBoundingClientRect(), px = (e.clientX - r.left) / r.width * W;
+    const d = Math.max(1, Math.min(hoje, Math.round((px - L) / (W - L - R) * (dias - 1)) + 1));
+    cross.setAttribute("x1", x(d)); cross.setAttribute("x2", x(d)); cross.setAttribute("opacity", 1);
+    tip.innerHTML = `${String(d).padStart(2, "0")}/10 · <b>${real[d - 1]}</b> vendidos · ritmo ${(meta / dias * d).toFixed(1)}`;
+    tip.style.opacity = 1; tip.style.left = (e.clientX + 12) + "px"; tip.style.top = (e.clientY - 34) + "px";
+  });
+  hit.addEventListener("mouseleave", () => { cross.setAttribute("opacity", 0); tip.style.opacity = 0; });
+  $("#ch-acum").appendChild(s);
+})();
+
+/* ---------- funil (rampa ordinal azul) ---------- */
+(function () {
+  const etapas = [["Leads", 186, "--seq-250"], ["Visitas agendadas", 92, "--seq-350"], ["Compareceram", 53, "--seq-450"], ["Vendidos", 24, "--seq-550"], ["Entregues", 19, "--seq-650"]];
+  const W = 520, rowH = 34, H = etapas.length * rowH + 4, L = 130, s = svg(W, H);
+  etapas.forEach(([n, v, c], i) => {
+    const w = v / 186 * (W - L - 70), y0 = i * rowH + 4;
+    txt(s, L - 10, y0 + 18, n, { class: "lbl-ink", "text-anchor": "end" });
+    const b = hbar(s, L, y0, Math.max(w, 2), 24, `var(${c})`);
+    const pct = i ? ` · ${Math.round(v / etapas[i - 1][1] * 100)}% da etapa anterior` : "";
+    txt(s, L + w + 8, y0 + 17, v, { class: "lbl-ink" });
+    hover(b, `<b>${n}</b>: ${v}${pct}`);
+  });
+  $("#ch-funil").appendChild(s);
+})();
+
+/* ---------- barras horizontais genéricas (um só hue) ---------- */
+function barrasH(id, dados, fmt = v => v, cor = "var(--s1)") {
+  const max = Math.max(...dados.map(d => d[1]));
+  const W = 520, rowH = 30, L = 120, H = dados.length * rowH + 4, s = svg(W, H);
+  dados.forEach(([n, v], i) => {
+    const w = v / max * (W - L - 80), y0 = i * rowH + 4;
+    txt(s, L - 10, y0 + 15, n, { class: "lbl-ink", "text-anchor": "end" });
+    const b = hbar(s, L, y0, Math.max(w, 2), 20, cor);
+    txt(s, L + w + 8, y0 + 15, fmt(v), { class: "lbl-ink" });
+    hover(b, `<b>${n}</b>: ${fmt(v)}`);
+  });
+  $(id).appendChild(s);
+}
+barrasH("#ch-canal", [["Tráfego (Meta)", 8], ["OLX", 6], ["Indicação", 4], ["Carteira / cliente", 3], ["Webmotors", 2], ["Site", 1]], v => v + (v === 1 ? " venda" : " vendas"));
+barrasH("#ch-idade", [["0–15 dias", 21], ["16–30 dias", 17], ["31–45 dias", 13], ["46–60 dias", 9], ["61–90 dias", 5], ["90+ dias", 2]], v => v + " carros", "var(--seq-450)");
+barrasH("#ch-etapas", [["Carro em trânsito", 4], ["Mecânico", 6], ["Pintura", 3], ["Preparação / Foto", 7], ["Estoque (à venda)", 47], ["Vendidos / entregar", 9], ["Recall", 2]], v => v + " carros");
+barrasH("#ch-recall", [["Elétrica / luzes", 4], ["Ar-condicionado", 3], ["Freio", 2], ["Câmbio", 2], ["Vazamento", 1], ["Outros", 2]], v => v + " casos");
+barrasH("#ch-retorno", [["Carlos", 22], ["Vinicius", 28], ["Yan", 41], ["Edson", 67]], v => v + " min");
+
+/* ---------- equipe ---------- */
+const equipe = [
+  ["Vinicius", 9, 10, 612000, 21, 88, 95, 7, 1], ["Yan", 7, 8, 498000, 15, 62, 80, 18, 2],
+  ["Carlos", 5, 7, 352000, 17, 91, 100, 5, 1], ["Edson", 3, 5, 158000, 8, 34, 60, 12, 1]];
+$("#tb-equipe").innerHTML = equipe.map(([n, v, m, f, c, r, rp, av, rc]) => {
+  const st = (ok) => `<span class="status"><span class="dot" style="background:var(${ok ? "--good" : "--serious"})"></span>${ok ? "ok" : "atenção"}</span>`;
+  return `<tr><td><b>${n}</b></td><td class="num">${v}</td><td class="num">${m}</td><td class="num">${Math.round(v / m * 100)}%</td><td class="num">${brl(f)}</td><td class="num">${c}%</td><td class="num">${r}% ${st(r >= 80)}</td><td class="num">${rp}% ${st(rp >= 90)}</td><td class="num">${av}</td><td class="num">${rc}</td></tr>`;
+}).join("");
+(function () {
+  const W = 520, rowH = 36, L = 80, H = equipe.length * rowH + 4, s = svg(W, H), max = 11;
+  equipe.forEach(([n, v, m], i) => {
+    const y0 = i * rowH + 4, sc = x => x / max * (W - L - 60);
+    txt(s, L - 10, y0 + 17, n, { class: "lbl-ink", "text-anchor": "end" });
+    const b = hbar(s, L, y0 + 2, sc(v), 20, "var(--s1)");
+    el("line", { x1: L + sc(m), x2: L + sc(m), y1: y0 - 2, y2: y0 + 26, stroke: "var(--ink)", "stroke-width": 2 }, s);
+    txt(s, L + Math.max(sc(v), sc(m)) + 8, y0 + 17, `${v}/${m}`, { class: "lbl-ink" });
+    hover(b, `<b>${n}</b>: ${v} vendas · meta ${m}`);
+  });
+  $("#ch-meta").appendChild(s);
+})();
+
+/* ---------- funil & marketing ---------- */
+(function () {
+  const dados = [["Tráfego", 92, 8], ["OLX", 58, 6], ["Webmotors", 22, 2], ["Site", 8, 1], ["WhatsApp", 6, 1]];
+  const W = 520, rowH = 38, L = 90, H = dados.length * rowH + 4, s = svg(W, H), sc = x => x / 92 * (W - L - 90);
+  dados.forEach(([n, l, v], i) => {
+    const y0 = i * rowH + 4;
+    txt(s, L - 10, y0 + 19, n, { class: "lbl-ink", "text-anchor": "end" });
+    const b1 = hbar(s, L, y0, sc(l), 14, "var(--s1)");
+    const b2 = hbar(s, L, y0 + 16, Math.max(sc(v), 3), 14, "var(--s2)");
+    txt(s, L + sc(l) + 8, y0 + 12, `${l} leads`, { class: "lbl-ink" });
+    txt(s, L + Math.max(sc(v), 3) + 8, y0 + 28, `${v} vendas · ${(v / l * 100).toFixed(1)}%`, { class: "lbl-ink" });
+    hover(b1, `<b>${n}</b>: ${l} leads`); hover(b2, `<b>${n}</b>: ${v} vendas (${(v / l * 100).toFixed(1)}%)`);
+  });
+  $("#ch-canal-leads").appendChild(s);
+})();
+(function () {
+  const vis = [3,4,2,5,3,1,0,4,5,3,2,4,2,0,5,6,3,4,3,1,0,4,3,5], tel = [4,3,5,2,4,2,1,5,3,4,5,3,2,1,4,3,5,2,4,2,1,3,4,4];
+  const W = 560, H = 210, L = 28, B = 24, T = 8, n = vis.length, bw = (W - L - 8) / n, s = svg(W, H), y = v => T + (1 - v / 12) * (H - T - B);
+  [0, 4, 8, 12].forEach(v => { el("line", { x1: L, x2: W, y1: y(v), y2: y(v), stroke: "var(--grid)" }, s); txt(s, L - 6, y(v) + 4, v, { "text-anchor": "end" }); });
+  vis.forEach((v, i) => {
+    const x0 = L + i * bw + 2, w = bw - 4;
+    const hv = y(0) - y(v), ht = y(0) - y(tel[i]);
+    if (hv) el("rect", { x: x0, y: y(v), width: w, height: Math.max(hv - 2, 0), fill: "var(--s1)" }, s);
+    const top = vbar(s, x0, y(v + tel[i]), w, Math.max(ht, 0.1), "var(--s2)");
+    const g = el("rect", { x: x0, y: T, width: w, height: H - T - B, fill: "transparent" }, s);
+    hover(g, `${String(i + 1).padStart(2, "0")}/10 · visita <b>${v}</b> · telefone <b>${tel[i]}</b>`);
+    if (i % 5 === 0) txt(s, x0 + w / 2, H - 6, String(i + 1).padStart(2, "0"), { "text-anchor": "middle" });
+  });
+  $("#ch-leads-dia").appendChild(s);
+})();
+
+/* ---------- estoque parado ---------- */
+$("#tb-parados").innerHTML = [
+  ["Mitsubishi Pajero Dakar 2013 (FAA-5J27)", 118, 69900, 64500, "Estoque", "--critical", "baixar preço"],
+  ["Jaguar XE 2017 (BGX-1J62)", 97, 129900, 121300, "Estoque", "--critical", "baixar preço"],
+  ["Citroen DS3 2012 (LRF-4F13)", 84, 42900, 39800, "Estoque", "--serious", "rever anúncio"],
+  ["Hyundai Sonata 2012 (ODE-0J75)", 76, 53900, 49900, "Estoque", "--serious", "rever anúncio"],
+  ["Ford Ecosport 2017 (KXH-7G59)", 63, 59900, 61200, "Pintura", "--warning", "acelerar preparação"]
+].map(([c, d, p, f, e, cor, s]) => `<tr><td>${c}</td><td class="num">${d}</td><td class="num">${brl(p)}</td><td class="num">${brl(f)}</td><td>${e}</td><td><span class="status"><span class="dot" style="background:var(${cor})"></span>${s}</span></td></tr>`).join("");
+
+/* ---------- avaliações: % FIPE ---------- */
+(function () {
+  const pts = [69,52,71,64,75,58,80,66,72,61,85,69,74,55,67,70,63,78,48,73,68,71,65,76,59,82,62];
+  const W = 560, H = 200, L = 34, B = 22, T = 10, s = svg(W, H), x = i => L + 10 + i / (pts.length - 1) * (W - L - 24), y = v => T + (1 - (v - 40) / 50) * (H - T - B);
+  el("rect", { x: L, y: y(75), width: W - L, height: y(65) - y(75), fill: "var(--neutral)" }, s);
+  txt(s, W - 4, y(75) - 4, "faixa-alvo 65–75%", { "text-anchor": "end" });
+  [40, 60, 80].forEach(v => { el("line", { x1: L, x2: W, y1: y(v), y2: y(v), stroke: "var(--grid)" }, s); txt(s, L - 6, y(v) + 4, v + "%", { "text-anchor": "end" }); });
+  pts.forEach((v, i) => {
+    const c = el("circle", { cx: x(i), cy: y(v), r: 5, fill: "var(--s1)", stroke: "var(--surface)", "stroke-width": 2 }, s);
+    hover(c, `Avaliação #${i + 1}: <b>${v}%</b> da FIPE`);
+  });
+  $("#ch-fipe").appendChild(s);
+})();
+
+/* ---------- abas e tema ---------- */
+document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => {
+  document.querySelectorAll(".tab").forEach(o => o.setAttribute("aria-selected", o === t));
+  document.querySelectorAll(".page").forEach(p => p.classList.toggle("on", p.id === t.dataset.p));
+}));
+$("#tema").addEventListener("click", () => {
+  const r = document.documentElement, escuro = r.dataset.theme === "dark" || (!r.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches);
+  r.dataset.theme = escuro ? "light" : "dark";
+});
+</script>
+</body>
+</html>

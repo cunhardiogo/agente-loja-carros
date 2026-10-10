@@ -278,3 +278,11 @@ def concluir_item(c: httpx.Client, card_id: str, item_id: str) -> None:
 
 def comentar(c: httpx.Client, card_id: str, texto: str) -> None:
     c.post(f"/cards/{card_id}/actions/comments", params={"text": texto}).raise_for_status()
+
+
+def remover_item(c: httpx.Client, card_id: str, item_id: str) -> None:
+    c.delete(f"/cards/{card_id}/checkItem/{item_id}").raise_for_status()
+
+
+def renomear_item(c: httpx.Client, card_id: str, item_id: str, texto: str) -> None:
+    c.put(f"/cards/{card_id}/checkItem/{item_id}", params={"name": texto}).raise_for_status()
