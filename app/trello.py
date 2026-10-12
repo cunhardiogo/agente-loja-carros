@@ -239,11 +239,12 @@ def cartoes(c: httpx.Client) -> tuple[list[dict], dict]:
     return cards, listas
 
 
-def achar_cartao(texto: str | None, cards: list[dict], listas: dict) -> dict | None:
-    """'208 azul', 'Civic 2014', 'RJR-0E26' → cartão do carro (fora do FINALIZADO). Só devolve se for único."""
+def achar_cartao(texto: str | None, cards: list[dict], listas: dict, todas: bool = False) -> dict | None:
+    """'208 azul', 'Civic 2014', 'RJR-0E26' → cartão do carro (fora do FINALIZADO, salvo todas=True).
+    Só devolve se for único."""
     if not texto:
         return None
-    vivos = [cd for cd in cards if listas.get(cd["idList"]) != FINALIZADO]
+    vivos = cards if todas else [cd for cd in cards if listas.get(cd["idList"]) != FINALIZADO]
     p = _placa(texto)
     if p:
         achados = [cd for cd in vivos if _placa(cd["name"]) == p]

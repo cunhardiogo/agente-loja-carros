@@ -453,10 +453,36 @@ def sincronizar_avaliacoes(c: httpx.Client) -> int:
     return len(rows)
 
 
+# ===== aba Recall (só saída) =====
+ABA_RECALL = "Recall"
+CAB_RECALL = ["Aberto em", "Vendedor", "Carro", "Placa", "Saída", "Garantia até", "Km saída", "Km atual", "Motivos",
+              "Status", "Agendado", "Pronto em", "Obs", "ID"]
+_STATUS_RECALL = {"aberto": "Sem data", "agendado": "Agendado", "na_loja": "Na loja", "pronto": "Pronto", "cancelado": "Cancelado"}
+
+
+def sincronizar_recall(c: httpx.Client) -> int:
+    from .recall_grupo import _placa_fmt, garantia_ate
+    _garantir_aba(c, ABA_RECALL)
+    planilha = _ler(c, ABA_RECALL)
+    nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
+    rows = db.select_all("recalls", {"select": "*", "origem": "eq.grupo", "aberto_em": f"gte.{DESDE}",
+                                     "order": "aberto_em.desc"})
+    valores = [CAB_RECALL]
+    for r in rows:
+        g = garantia_ate(r)
+        valores.append([_fmt_dt(r["aberto_em"]), nomes.get(r.get("vendedor_id"), ""), r.get("veiculo") or "",
+                        _placa_fmt(r.get("placa")), _fmt_d(r.get("data_saida")), f"{g:%d/%m/%Y}" if g else "",
+                        str(r.get("km_saida") or ""), str(r.get("km_atual") or ""), r.get("motivo") or "",
+                        _STATUS_RECALL.get(r["status"], r["status"]), _fmt_dt(r.get("agendado_para")),
+                        _fmt_dt(r.get("pronto_em")), r.get("observacao") or "", r["id"]])
+    _escrever_se_mudou(c, ABA_RECALL, CAB_RECALL, planilha, valores)
+    return len(rows)
+
+
 def sincronizar_tudo() -> dict:
     if not configurado():
         return {}
     with _cliente() as c:
         return {"agendamentos": sincronizar_leads(c), "vendas": sincronizar_vendas(c),
                 "entregas": sincronizar_entregas(c), "pagamentos": sincronizar_pagamentos(c),
-                "avaliacoes": sincronizar_avaliacoes(c)}
+                "avaliacoes": sincronizar_avaliacoes(c), "recall": sincronizar_recall(c)}

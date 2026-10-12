@@ -138,6 +138,32 @@ def placa_venda(termo: str, placa: str) -> dict:
     return {"ok": True, "venda": vendas_grupo._carro({**v, "placa": nova}), "cartao_trello": cartao}
 
 
+def corrigir_recall(termo: str, status: str | None = None, data: str | None = None, horario: str | None = None,
+                    motivo: str | None = None) -> dict:
+    from . import recall_grupo as rg
+    from .leads import _data
+    rows = [r for r in rg._abertos() if _bate(termo, r.get("veiculo"), r.get("placa"))]
+    r, err = _unico(rows, rg._rotulo, "recall aberto")
+    if err:
+        return err
+    agora = datetime.now(timezone.utc)
+    if status == "cancelado":
+        db.update("recalls", {"status": "cancelado"}, {"id": f"eq.{r['id']}"})
+        rg.sujo["v"] = True
+        return {"ok": True, "recall": rg._rotulo(r), "status": "cancelado"}
+    if motivo:
+        rg._novo_ou_soma(r, {"motivos": [motivo]}, False)
+    it: dict = {"tipo": status}
+    if data:
+        d = _data(data, rg.datas.hoje())
+        if not d:
+            return {"erro": f"não entendi a data '{data}'"}
+        it.update({"quando": f"{d.isoformat()}T{horario or '09:00'}", "quando_texto": f"{data} {horario or ''}".strip()})
+    rg._aplicar_estado(r, it, agora, False)
+    rg.sujo["v"] = True
+    return {"ok": True, "recall": rg._rotulo(r), "status": r.get("status"), "motivo": r.get("motivo")}
+
+
 def tarefa_preparacao(carro: str, acao: str, descricao: str) -> dict:
     """acao: adicionar | concluir | remover (remover pede confirmação)."""
     from . import preparacao_grupo as pg

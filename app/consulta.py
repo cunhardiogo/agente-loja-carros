@@ -714,8 +714,13 @@ def progresso_metas(mes: str | None = None) -> dict:
 
 
 def listar_recalls() -> dict:
-    rows = db.select_all("recalls", {"select": "cliente_nome,veiculo,placa,motivo,created_at",
-                                     "status": "eq.aberto", "order": "created_at.desc"})
+    from .recall_grupo import garantia_ate
+    rows = db.select_all("recalls", {"select": "veiculo,placa,motivo,status,aberto_em,agendado_para,data_saida,observacao",
+                                     "origem": "eq.grupo", "status": "in.(aberto,agendado,na_loja)",
+                                     "order": "aberto_em.desc"})
+    for r in rows:
+        g = garantia_ate(r)
+        r["garantia_ate"] = g.isoformat() if g else None
     return {"quantidade": len(rows), "recalls": rows}
 
 
@@ -890,6 +895,7 @@ def _fmt_data_sp(iso: str) -> str:
 
 
 DISPATCH = {
+    "corrigir_recall": lambda **k: __import__("app.acoes", fromlist=["x"]).corrigir_recall(**k),
     "corrigir_lead": lambda **k: __import__("app.acoes", fromlist=["x"]).corrigir_lead(**k),
     "corrigir_entrega": lambda **k: __import__("app.acoes", fromlist=["x"]).corrigir_entrega(**k),
     "valor_avaliacao": lambda **k: __import__("app.acoes", fromlist=["x"]).valor_avaliacao(**k),
@@ -947,6 +953,15 @@ _DI = {"type": "string", "description": "Data início ISO YYYY-MM-DD (opcional, 
 _DF = {"type": "string", "description": "Data fim ISO YYYY-MM-DD (opcional)"}
 
 TOOLS = [
+    {"type": "function", "function": {
+        "name": "corrigir_recall",
+        "description": "AÇÃO: atualizar um recall (grupo RECALL): marcar pronto, na loja, agendar dia/hora, acrescentar motivo ou cancelar. Ex.: 'o recall do Duster ficou pronto', 'a T-Cross vem quinta 10h', 'cancela o recall da Twister'.",
+        "parameters": {"type": "object", "properties": {
+            "termo": {"type": "string", "description": "carro ou placa"},
+            "status": {"type": "string", "enum": ["pronto", "na_loja", "cancelado"]},
+            "data": {"type": "string", "description": "dd/mm/aaaa"}, "horario": {"type": "string", "description": "HH:MM"},
+            "motivo": {"type": "string", "description": "defeito a acrescentar"}}, "required": ["termo"]},
+    }},
     {"type": "function", "function": {
         "name": "corrigir_lead",
         "description": "AÇÃO: corrigir um lead do grupo de agendamento (vendedor, data, horário, status, tipo, observação, telefone). Ex.: 'o lead do Jairo é do Edson', 'o Gerson remarcou pra sexta 15h', 'o lead da Vera não veio'.",
@@ -1232,7 +1247,7 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "listar_recalls",
-        "description": "Recalls/retornos de clientes em aberto (grupo RECALL): cliente, veículo e motivo.",
+        "description": "Recalls em aberto (grupo RECALL): carro, placa, motivos, status (aberto=sem data, agendado, na_loja), data agendada e garantia (90 dias da saída).",
         "parameters": {"type": "object", "properties": {}},
     }},
     {"type": "function", "function": {
@@ -1265,7 +1280,7 @@ LEMBRETES: criar_lembrete quando o dono pedir p/ ser lembrado (calcule 'quando' 
 SUPERVISOR: você é proativo. radar mostra os alertas abertos (carro encalhado, a receber parado, entrega atrasada, comparecimento baixo, sistema fora) — use quando perguntarem 'o que preciso resolver?'/'como está a operação?', e resolver_alerta p/ baixar um. anotar salva recado livre sem horário; listar_notas/resolver_nota gerenciam. pendências (listar_pendencias) mostra o que aguarda sua confirmação.
 SECRETÁRIA (assistido — você organiza, o DONO contata): lista_ligar_hoje dá quem ligar hoje (faltas de ontem, reservas paradas, entrega atrasada, a receber) com telefone — use em 'quem preciso contatar?'/'tem alguém pra ligar?'. mensagem_cobranca monta um texto pronto e educado de cobrança pra um cliente com saldo (ex 'manda uma cobrança pro João'); ENTREGUE o texto pro dono copiar/encaminhar e deixe claro que ele revisa e envia — você NUNCA manda direto pro cliente.
 LEADS (grupo Agendamento SDR — fonte oficial de visitas e negociações por telefone): use leads_abertos, buscar_lead e resumo_leads para qualquer pergunta sobre agendamentos, leads, SDRs, retorno de vendedor e cobranças. Tipos: Visita (horário na loja), Negociação telefone, Turno (horário e vendedor definidos).
-CORREÇÕES PELO DONO: corrigir_lead, corrigir_entrega, valor_avaliacao, placa_venda, tarefa_preparacao (adicionar/concluir/remover), mover_cartao, criar_cartao, atualizar_venda, marcar_venda_caiu. Planilha e descrição do grupo se atualizam sozinhas. Quando a ferramenta devolver precisa_confirmar, diga ao dono exatamente o que vai ser feito e peça "ok" ou "não" — não diga que já fez. Se achar mais de um registro, mostre as opções e pergunte qual.
+CORREÇÕES PELO DONO: corrigir_recall, corrigir_lead, corrigir_entrega, valor_avaliacao, placa_venda, tarefa_preparacao (adicionar/concluir/remover), mover_cartao, criar_cartao, atualizar_venda, marcar_venda_caiu. Planilha e descrição do grupo se atualizam sozinhas. Quando a ferramenta devolver precisa_confirmar, diga ao dono exatamente o que vai ser feito e peça "ok" ou "não" — não diga que já fez. Se achar mais de um registro, mostre as opções e pergunte qual.
 COBRANÇAS A VENDEDORES: o agente ENVIA sim, pelo número do dono, depois da aprovação. Se o dono pedir para mandar mensagem/cobrança a um vendedor, NÃO diga que não envia: explique que basta responder à cobrança pendente com 'ok CÓDIGO', 'não CÓDIGO' ou 'texto novo: <mensagem>'.
 VENDAS do grupo: vendas_pendentes (sem resumo, resumo incompleto, reservas) e buscar_venda (detalhe de uma venda com comprovantes de pagamento).
 
