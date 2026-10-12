@@ -14,6 +14,7 @@ from .leads import _ascii, _dt, _iso, _quando, _stanza, _texto
 log = logging.getLogger("agente")
 
 PARADA_DIAS = 2
+RECADOS_ATIVOS = False  # pausado a pedido do dono (12/10) — só religar quando ele mandar
 FELIPE = "5521994110597"
 PESSOAS = {"183863389221110@lid": "Daniel", "217982575837352@lid": "Caio", "248442551009535@lid": "Luiz Armando",
            "50427244589224@lid": "Felipe", "50852479930380@lid": "Igor"}
@@ -199,6 +200,8 @@ def _carro(t: dict) -> str:
 
 
 def checar_paradas(agora: datetime | None = None) -> int:
+    if not RECADOS_ATIVOS:
+        return 0
     agora = agora or datetime.now(timezone.utc)
     hora = agora.astimezone(datas.TZ).hour
     if not 9 <= hora < 19:  # recado só em horário comercial
