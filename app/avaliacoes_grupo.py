@@ -157,9 +157,11 @@ def processar(data: dict, historico: bool = False) -> dict:
 
 
 # ===== aviso de avaliação sem valor e desfecho com a venda =====
-def checar(agora: datetime | None = None) -> int:
+def checar(agora: datetime | None = None, avisar: bool = True) -> int:
     agora = agora or datetime.now(timezone.utc)
     n = 0
+    if not avisar:
+        return ligar_vendas()
     limite = _iso(agora - timedelta(minutes=AVISO_MIN))
     nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
     for a in db.select_all("avaliacoes", {"select": "*", "origem": "eq.grupo", "historico": "eq.false",

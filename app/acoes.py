@@ -61,7 +61,7 @@ def corrigir_lead(termo: str, vendedor: str | None = None, data: str | None = No
             upd.update(_converter(col, v))
     if not upd:
         return {"erro": "não entendi o que mudar no lead"}
-    db.update("leads", upd, {"id": f"eq.{l['id']}"})
+    _alterar("leads", l, upd, f"corrigir lead {l.get('cliente_nome')}")
     _sujo(leads)
     return {"ok": True, "lead": f"{l.get('cliente_nome')} — {l.get('veiculo')}", "alterado": upd}
 
@@ -87,7 +87,7 @@ def corrigir_entrega(termo: str, data: str | None = None, horario: str | None = 
     if not upd and entregue is None:
         return {"erro": "não entendi o que mudar na entrega"}
     if upd:
-        db.update("entregas", upd, {"id": f"eq.{e['id']}"})
+        _alterar("entregas", e, upd, f"corrigir entrega {e.get('veiculo')}")
         if e.get("venda_id") and "data_entrega" in upd:
             db.update("vendas", {"data_entrega_prevista": upd["data_entrega"], "data_entrega_texto": data},
                       {"id": f"eq.{e['venda_id']}"})
@@ -105,8 +105,9 @@ def valor_avaliacao(termo: str, valor: str) -> dict:
                     "avaliação")
     if err:
         return err
-    db.update("avaliacoes", {"valor_texto": valor, "valor_avaliacao": avaliacoes_grupo.valor_numerico(valor),
-                             "valor_por": "Diogo", "valor_em": _iso(datetime.now(timezone.utc))}, {"id": f"eq.{a['id']}"})
+    _alterar("avaliacoes", a, {"valor_texto": valor, "valor_avaliacao": avaliacoes_grupo.valor_numerico(valor),
+                               "valor_por": "Diogo", "valor_em": _iso(datetime.now(timezone.utc))},
+             f"valor da avaliação {a.get('modelo')}: {valor}")
     _sujo(avaliacoes_grupo)
     return {"ok": True, "avaliacao": f"{a.get('modelo')} {a.get('ano') or ''}", "valor": valor}
 
@@ -123,7 +124,7 @@ def placa_venda(termo: str, placa: str) -> dict:
     v, err = _unico(rows, lambda r: f"{vendas_grupo._carro(r)} ({r.get('cliente_nome') or '?'})", "venda")
     if err:
         return err
-    db.update("vendas", {"placa": nova}, {"id": f"eq.{v['id']}"})
+    _alterar("vendas", v, {"placa": nova}, f"placa da venda {vendas_grupo._carro(v)} → {nova}")
     cartao = None
     if v.get("trello_card_id") and trello.configurado():
         with trello._cliente() as c:
@@ -249,6 +250,14 @@ def _executar(a: dict) -> None:
                 trello.remover_item(c, t["card_id"], t["checklist_item_id"])
         db.delete("prep_tarefas", {"id": f"eq.{t['id']}"})
         return
+    if a["tipo"] == "apagar":
+        from .controle import executar_apagar
+        executar_apagar(p)
+        return
+    if a["tipo"] == "enviar_mensagem":
+        from . import evolution
+        evolution.enviar_por_coletor(p["destino"], p["texto"])
+        return
     with trello._cliente() as c:
         _, listas = trello.cartoes(c)
         id_lista = next(k for k, v in listas.items() if v == p["destino"])
@@ -256,3 +265,63 @@ def _executar(a: dict) -> None:
             c.put(f"/cards/{p['card_id']}", params={"idList": id_lista, "pos": "top"}).raise_for_status()
         elif a["tipo"] == "criar_cartao":
             c.post("/cards", params={"idList": id_lista, "name": p["nome"], "pos": "top"}).raise_for_status()
+
+
+# ===== histórico e desfazer =====
+def _alterar(tabela: str, row: dict, upd: dict, descricao: str) -> None:
+    """Atualiza guardando o valor anterior dos campos, pra 'desfaz' voltar."""
+    db.update(tabela, upd, {"id": f"eq.{row['id']}"})
+    try:
+        db.insert("acoes_log", {"tabela": tabela, "registro_id": str(row["id"]), "descricao": descricao,
+                                "antes": {k: row.get(k) for k in upd}, "depois": upd})
+    except Exception:
+        log.exception("falha registrando histórico da ação")
+
+
+def _criado(tabela: str, row: dict, descricao: str) -> None:
+    try:
+        db.insert("acoes_log", {"tabela": tabela, "registro_id": str(row["id"]), "descricao": descricao,
+                                "antes": None, "depois": {"criado": True}})
+    except Exception:
+        log.exception("falha registrando histórico da ação")
+
+
+_SUJOS = {"leads": "leads", "vendas": "vendas_grupo", "entregas": "entregas_grupo", "avaliacoes": "avaliacoes_grupo",
+          "recalls": "recall_grupo", "pagamentos": "vendas_grupo"}
+
+
+def _marcar_sujo(tabela: str) -> None:
+    import importlib
+    if tabela in _SUJOS:
+        importlib.import_module(f"app.{_SUJOS[tabela]}").sujo["v"] = True
+
+
+def historico_acoes(limite: int = 10) -> dict:
+    rows = db.select("acoes_log", {"select": "descricao,desfeito,created_at", "order": "created_at.desc",
+                                   "limit": str(limite)})
+    return {"acoes": [{"quando": r["created_at"][:16], "o_que": r["descricao"], "desfeita": r["desfeito"]}
+                      for r in rows]}
+
+
+def desfazer() -> dict:
+    """Volta a última alteração feita por mensagem (banco e planilha; Trello e mensagens enviadas não voltam)."""
+    rows = db.select("acoes_log", {"select": "*", "desfeito": "eq.false", "order": "created_at.desc", "limit": "1"})
+    if not rows:
+        return {"erro": "não tem nenhuma alteração pra desfazer"}
+    a = rows[0]
+    if a["antes"] is None:  # foi criação: desfazer = tirar
+        if a["tabela"] == "pagamentos":
+            vid = (db.select("pagamentos", {"select": "venda_id", "id": f"eq.{a['registro_id']}"}) or [{}])[0].get("venda_id")
+            db.delete("pagamentos", {"id": f"eq.{a['registro_id']}"})
+            if vid:
+                from .vendas_grupo import recalcular
+                recalcular(vid)
+        else:
+            upd = {"status": "cancelado"} if a["tabela"] == "recalls" else \
+                {"status": "removida"} if a["tabela"] == "avaliacoes" else {"removido": True}
+            db.update(a["tabela"], upd, {"id": f"eq.{a['registro_id']}"})
+    else:
+        db.update(a["tabela"], a["antes"], {"id": f"eq.{a['registro_id']}"})
+    db.update("acoes_log", {"desfeito": True}, {"id": f"eq.{a['id']}"})
+    _marcar_sujo(a["tabela"])
+    return {"ok": True, "desfeito": a["descricao"]}

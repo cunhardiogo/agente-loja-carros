@@ -7,7 +7,7 @@ from datetime import timedelta
 from fastapi import BackgroundTasks, FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from . import (acoes, avaliacoes_grupo, recall_grupo, cobrancas, confirmacao, consulta, entregas_grupo, fotos_grupo, preparacao_grupo, trello, datas, db, evolution, ingest, leads, media, meta_ads, planilha, sheets,
+from . import (acoes, arquivo, avaliacoes_grupo, flags, recall_grupo, cobrancas, confirmacao, consulta, entregas_grupo, fotos_grupo, preparacao_grupo, trello, datas, db, evolution, ingest, leads, media, meta_ads, planilha, sheets,
                supervisor, vendas_grupo)
 from .config import settings
 
@@ -79,38 +79,18 @@ def _tick_inner() -> None:
         _radar()
         _checar_lojasb()
     _checar_relatorios()
-    try:
-        leads.checar_prazos()
-    except Exception:
-        log.exception("erro checando prazos de leads")
-    try:
-        vendas_grupo.checar_prazos()
-    except Exception:
-        log.exception("erro checando prazos de vendas")
-    try:
-        avaliacoes_grupo.checar()
-    except Exception:
-        log.exception("erro checando avaliações")
-    try:
-        recall_grupo.checar()
-    except Exception:
-        log.exception("erro checando recall")
-    try:
-        preparacao_grupo.checar_paradas()
-    except Exception:
-        log.exception("erro checando preparação parada")
-    try:
-        entregas_grupo.checar_posvenda()
-    except Exception:
-        log.exception("erro propondo pós-venda")
-    try:
-        entregas_grupo.checar_prazos()
-    except Exception:
-        log.exception("erro checando prazos de entregas")
-    try:
-        vendas_grupo.atualizar_descricao()
-    except Exception:
-        log.exception("erro atualizando descrição do grupo de vendas")
+    # (automação que o dono liga/desliga por mensagem, função) — ligar_vendas das avaliações roda sempre
+    for flag, fn in (("cobranca_leads", leads.checar_prazos), ("cobranca_vendas", vendas_grupo.checar_prazos),
+                     (None, lambda: avaliacoes_grupo.checar(avisar=flags.ativo("aviso_avaliacao"))),
+                     ("aviso_recall", recall_grupo.checar), ("recados_preparacao", preparacao_grupo.checar_paradas),
+                     ("posvenda", entregas_grupo.checar_posvenda), ("cobranca_entregas", entregas_grupo.checar_prazos),
+                     ("descricao_vendas", vendas_grupo.atualizar_descricao)):
+        if flag and not flags.ativo(flag):
+            continue
+        try:
+            fn()
+        except Exception:
+            log.exception("erro na automação %s", flag or "avaliacoes")
     mudou = leads.sujo["v"] or vendas_grupo.sujo["v"] or entregas_grupo.sujo["v"] or avaliacoes_grupo.sujo["v"] \
         or recall_grupo.sujo["v"]
     if mudou or _time.time() - _ult_controle["t"] > 120:  # edições da equipe ~2 min
@@ -277,7 +257,7 @@ def _jobs_relatorio(dow: int, hhmm: str) -> list:
         ("semanal", _resumo_semanal_texto, {6}, "18:00", "21:59"),
     ]
     return [(tipo, fn) for tipo, fn, dias, ini, fim in JANELAS
-            if tipo in RELATORIOS_ATIVOS and dow in dias and ini <= hhmm <= fim]
+            if tipo in RELATORIOS_ATIVOS and flags.ativo(f"relatorio_{tipo}") and dow in dias and ini <= hhmm <= fim]
 
 
 _SO_DONO = {"agenda", "planejamento", "vespera_entregas"}  # relatórios que vão só pro MEU_NUMERO (os demais vão pra todos)
@@ -371,6 +351,11 @@ def _rotear_evento(body: dict) -> dict:
 
     eh_assistente = bool(settings.evolution_assist_instance) and instancia == settings.evolution_assist_instance
     apikey = settings.evolution_assist_apikey if eh_assistente else settings.evolution_apikey
+
+    if not eh_assistente and (body.get("event") or "").lower().replace("_", ".") in ("messages.upsert", ""):
+        monitorado = ingest.grupo_por_jid(jid)
+        if monitorado:  # arquivo pra busca do dono — antes de qualquer tratamento
+            arquivo.arquivar(data, monitorado.get("nome"))
 
     # grupo de agendamento: formulário/resposta/nota viram lead (sem IA de extração nem mídia)
     if jid.endswith("@g.us") and not eh_assistente:

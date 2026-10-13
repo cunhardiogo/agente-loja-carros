@@ -284,14 +284,15 @@ def a_receber_vendas(periodo: str = "tudo", data_inicio: str | None = None, data
 def marcar_venda_caiu(termo: str) -> dict:
     """Venda que caiu: sai da contagem, do ranking e da descrição do grupo."""
     t = db.ilike(termo)
-    rows = db.select("vendas", {"select": "id,modelo,versao,placa,cliente_nome", "removido": "eq.false",
+    rows = db.select("vendas", {"select": "id,modelo,versao,placa,cliente_nome,status_venda", "removido": "eq.false",
                                 "status_venda": "in.(completa,aguardando_resumo,reservado)",
                                 "or": f"(modelo.{t},versao.{t},placa.{t},cliente_nome.{t})"})
     if len(rows) != 1:
         return {"erro": "nenhuma venda encontrada" if not rows else "mais de uma venda encontrada, especifique",
                 "encontradas": [" ".join(x for x in (r.get("modelo"), r.get("versao"), r.get("placa")) if x) for r in rows]}
-    db.update("vendas", {"status_venda": "desistiu"}, {"id": f"eq.{rows[0]['id']}"})
-    from . import vendas_grupo
+    from . import acoes, vendas_grupo
+    acoes._alterar("vendas", {**rows[0], "status_venda": rows[0].get("status_venda")}, {"status_venda": "desistiu"},
+                   f"venda caiu: {rows[0].get('modelo') or ''} {rows[0].get('cliente_nome') or ''}".strip())
     vendas_grupo.sujo["v"] = True
     return {"ok": True, "venda": " ".join(x for x in (rows[0].get("modelo"), rows[0].get("versao"), rows[0].get("placa")) if x)}
 
@@ -382,13 +383,15 @@ def listar_avaliacoes(periodo: str = "mes") -> dict:
 def _matches_venda(rows, cliente, veiculo):
     """Casa por cliente E veículo (cada um opcional). Diferente do match antigo (OR
     no primeiro hit), retorna TODAS as vendas que batem — pra exigir unicidade."""
-    c = (cliente or "").strip().lower()
-    v = (veiculo or "").strip().lower()
+    from .leads import _ascii
+    c = _ascii(cliente or "").strip()
+    v = _ascii(veiculo or "").strip().replace("-", "")
     out = []
     for r in rows:
-        nome = (r.get("cliente_nome") or "").lower()
-        carro = f"{r.get('modelo', '') or ''} {r.get('versao', '') or ''}".lower()
-        if (c or v) and (c in nome if c else True) and (v in carro if v else True):
+        nome = _ascii(r.get("cliente_nome") or "")
+        carro = _ascii(f"{r.get('modelo') or ''} {r.get('versao') or ''} {r.get('ano') or ''} "
+                       f"{r.get('placa') or ''}").replace("-", "")
+        if (c or v) and (c in nome if c else True) and (all(p in carro for p in v.split()) if v else True):
             out.append(r)
     return out
 
@@ -456,11 +459,12 @@ def _match_carro(r, termo):
 
 def atualizar_venda(cliente: str | None = None, veiculo: str | None = None, **campos) -> dict:
     """Edita uma venda existente. Localiza por cliente E/OU veículo (exige unicidade)."""
-    rows = db.select_all("vendas", {"select": "id,cliente_nome,modelo,versao"})
+    rows = db.select_all("vendas", {"select": "*", "removido": "eq.false"})
     r, err = _venda_unica(rows, cliente, veiculo, "venda")
     if err:
         return err
-    permitidos = {"portal_venda", "valor_venda", "forma_pagamento", "banco", "valor_financiado",
+    permitidos = {"portal_venda", "valor_venda", "valor_total", "over_valor", "desconto", "retorno", "troca_modelo",
+                  "troca_placa", "revenda", "forma_pagamento", "banco", "valor_financiado",
                   "valor_entrada", "troca_valor", "status_pagamento", "status_entrega",
                   "data_venda", "data_entrega_prevista", "cliente_nome", "observacoes",
                   "marca", "modelo", "versao", "ano", "cor", "km", "placa"}
@@ -471,7 +475,14 @@ def atualizar_venda(cliente: str | None = None, veiculo: str | None = None, **ca
             set_["vendedor_id"] = vend["id"]
     if not set_:
         return {"erro": "não entendi o que mudar"}
-    db.update("vendas", set_, {"id": f"eq.{r['id']}"})
+    from . import acoes, vendas_grupo
+    if "placa" in set_:
+        set_["placa"] = vendas_grupo.placa_norm(set_["placa"]) or set_["placa"]
+    novo = {**r, **set_}
+    set_["pendencias"] = vendas_grupo.pendencias_venda(novo)
+    acoes._alterar("vendas", r, set_, f"corrigir venda {vendas_grupo._carro(r)}: {', '.join(k for k in set_ if k != 'pendencias')}")
+    vendas_grupo.recalcular(r["id"])
+    vendas_grupo.sujo["v"] = True  # planilha e descrição do grupo refletem a correção
     return {"ok": True, "venda": f"{r['cliente_nome']} — {r.get('modelo','')}".strip(), "alterado": set_}
 
 
@@ -895,6 +906,23 @@ def _fmt_data_sp(iso: str) -> str:
 
 
 DISPATCH = {
+    "buscar_mensagens": lambda **k: __import__("app.arquivo", fromlist=["x"]).buscar(**k),
+    "criar_venda": lambda **k: __import__("app.controle", fromlist=["x"]).criar_venda(**k),
+    "criar_lead": lambda **k: __import__("app.controle", fromlist=["x"]).criar_lead(**k),
+    "criar_entrega": lambda **k: __import__("app.controle", fromlist=["x"]).criar_entrega(**k),
+    "registrar_pagamento": lambda **k: __import__("app.controle", fromlist=["x"]).registrar_pagamento(**k),
+    "criar_avaliacao": lambda **k: __import__("app.controle", fromlist=["x"]).criar_avaliacao(**k),
+    "apagar": lambda **k: __import__("app.controle", fromlist=["x"]).apagar(**k),
+    "desfazer": lambda **k: __import__("app.acoes", fromlist=["x"]).desfazer(**k),
+    "historico_acoes": lambda **k: __import__("app.acoes", fromlist=["x"]).historico_acoes(**k),
+    "consultar_trello": lambda **k: __import__("app.controle", fromlist=["x"]).consultar_trello(**k),
+    "renomear_cartao": lambda **k: __import__("app.controle", fromlist=["x"]).renomear_cartao(**k),
+    "prazo_cartao": lambda **k: __import__("app.controle", fromlist=["x"]).prazo_cartao(**k),
+    "automacoes": lambda **k: __import__("app.controle", fromlist=["x"]).automacoes(**k),
+    "automacao": lambda **k: __import__("app.controle", fromlist=["x"]).automacao(**k),
+    "descricao_vendas": lambda **k: __import__("app.controle", fromlist=["x"]).descricao_vendas(**k),
+    "enviar_mensagem": lambda **k: __import__("app.controle", fromlist=["x"]).enviar_mensagem(**k),
+    "preparacao_aberta": lambda **k: __import__("app.preparacao_grupo", fromlist=["x"]).agenda_texto(**k),
     "corrigir_recall": lambda **k: __import__("app.acoes", fromlist=["x"]).corrigir_recall(**k),
     "corrigir_lead": lambda **k: __import__("app.acoes", fromlist=["x"]).corrigir_lead(**k),
     "corrigir_entrega": lambda **k: __import__("app.acoes", fromlist=["x"]).corrigir_entrega(**k),
@@ -953,6 +981,23 @@ _DI = {"type": "string", "description": "Data início ISO YYYY-MM-DD (opcional, 
 _DF = {"type": "string", "description": "Data fim ISO YYYY-MM-DD (opcional)"}
 
 TOOLS = [
+    {"type": "function", "function": {"name": "buscar_mensagens", "description": "Busca em TODAS as mensagens dos grupos e conversas monitoradas (vendas, agendamento, entregas, preparação, fotos, avaliações, recall, gerência, marketing, tráfego, conversas com Felipe/Igor/Caio). Use para 'o que o Felipe falou do Civic', 'quem mandou o comprovante do Fastback', 'o que rolou hoje na gerência', 'procura TUL-5J38'. Sem termo traz as últimas da conversa. Resuma o que achou e diga quem/quando.", "parameters": {"type": "object", "properties": {"termo": {"type": "string", "description": "palavras a procurar (todas precisam aparecer)"}, "conversa": {"type": "string", "description": "parte do nome do grupo/conversa (ex: gerencia, vendas, felipe)"}, "pessoa": {"type": "string", "description": "quem mandou"}, "dias": {"type": "integer", "description": "padrão 30"}}}}},
+    {"type": "function", "function": {"name": "criar_venda", "description": "AÇÃO: lançar uma venda ou reserva que não foi postada no grupo. Ex.: 'lança venda do Carlos: Onix 2019 placa RKC1A23, cliente João, 65 mil à vista', 'o Yan reservou o Pulse'.", "parameters": {"type": "object", "properties": {"vendedor": {"type": "string"}, "carro": {"type": "string"}, "ano": {"type": "integer"}, "placa": {"type": "string"}, "cliente": {"type": "string"}, "valor": {"type": "string"}, "data": {"type": "string", "description": "dd/mm/aaaa ou dd/mm"}, "reserva": {"type": "boolean"}, "revenda": {"type": "boolean"}, "forma_pagamento": {"type": "string"}, "canal": {"type": "string"}}, "required": ["vendedor", "carro"]}}},
+    {"type": "function", "function": {"name": "criar_lead", "description": "AÇÃO: lançar um lead/agendamento que não veio pelo grupo. Ex.: 'agenda a Maria pro Edson amanhã 15h, quer o Compass, 21999998888'.", "parameters": {"type": "object", "properties": {"cliente": {"type": "string"}, "vendedor": {"type": "string"}, "carro": {"type": "string"}, "telefone": {"type": "string"}, "data": {"type": "string", "description": "dd/mm/aaaa ou dd/mm"}, "horario": {"type": "string"}, "tipo": {"type": "string", "enum": ["Visita", "Negociação telefone", "Turno"]}, "observacao": {"type": "string"}}, "required": ["cliente"]}}},
+    {"type": "function", "function": {"name": "criar_entrega", "description": "AÇÃO: lançar uma entrega que não está no quadro do grupo. Ex.: 'entrega do HRV do Carlos sexta 10h, levar com tanque cheio'.", "parameters": {"type": "object", "properties": {"carro": {"type": "string"}, "vendedor": {"type": "string"}, "data": {"type": "string", "description": "dd/mm/aaaa ou dd/mm"}, "horario": {"type": "string"}, "observacao": {"type": "string"}, "placa": {"type": "string"}}, "required": ["carro"]}}},
+    {"type": "function", "function": {"name": "registrar_pagamento", "description": "AÇÃO: registrar um pagamento recebido numa venda (sem comprovante no grupo). Ex.: 'entrou 20 mil do Fastback hoje no pix'.", "parameters": {"type": "object", "properties": {"venda": {"type": "string", "description": "carro, placa ou cliente da venda"}, "valor": {"type": "string"}, "data": {"type": "string", "description": "dd/mm/aaaa ou dd/mm"}, "forma": {"type": "string"}}, "required": ["venda", "valor"]}}},
+    {"type": "function", "function": {"name": "criar_avaliacao", "description": "AÇÃO: lançar uma avaliação que não veio pelo grupo. Ex.: 'avaliei um Corolla 2018, 80 mil km, fipe 95, pago 70'.", "parameters": {"type": "object", "properties": {"carro": {"type": "string"}, "ano": {"type": "integer"}, "km": {"type": "string"}, "fipe": {"type": "string"}, "valor": {"type": "string", "description": "como o dono falou"}, "vendedor": {"type": "string"}, "placa": {"type": "string"}, "cliente_quer": {"type": "string"}}, "required": ["carro"]}}},
+    {"type": "function", "function": {"name": "apagar", "description": "AÇÃO: apagar um registro que entrou errado (venda, reserva, lead, entrega, avaliação, recall ou pagamento). Pede confirmação. Ex.: 'apaga a venda duplicada da Xmax', 'apaga o pagamento de 5 mil do Kicks'.", "parameters": {"type": "object", "properties": {"tipo": {"type": "string", "enum": ["venda", "lead", "entrega", "avaliacao", "recall", "pagamento"]}, "termo": {"type": "string", "description": "carro, placa, cliente (para pagamento: a venda)"}}, "required": ["tipo", "termo"]}}},
+    {"type": "function", "function": {"name": "desfazer", "description": "AÇÃO: desfaz a ÚLTIMA alteração feita por mensagem (correção, lançamento, apagado). Não volta Trello nem mensagens enviadas. Ex.: 'desfaz', 'volta o que você fez'.", "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "historico_acoes", "description": "Últimas alterações feitas por mensagem do dono (o que foi mudado e se foi desfeito).", "parameters": {"type": "object", "properties": {"limite": {"type": "integer"}}}}},
+    {"type": "function", "function": {"name": "consultar_trello", "description": "Quadro ESTOQUE do Trello (é o estoque real): sem nada = quantos carros por lista; com lista = os carros dela com dias no quadro, prazo e checklist; com carro = o cartão com os checklists (preparação, recall, entrega). Ex.: 'o que tem na pintura?', 'quantos carros em estoque?', 'o que falta no Kicks?', 'carro mais parado'.", "parameters": {"type": "object", "properties": {"lista": {"type": "string", "description": "estoque, trânsito, pintura, mecânico, preparação/foto, vendidos, recall, finalizado"}, "carro": {"type": "string"}}}}},
+    {"type": "function", "function": {"name": "renomear_cartao", "description": "AÇÃO: trocar o nome de um cartão do Trello. Ex.: 'renomeia o Kicks pra Nissan Kicks 2018 (LTF-8J85)'.", "parameters": {"type": "object", "properties": {"carro": {"type": "string"}, "nome": {"type": "string", "description": "nome novo completo"}}, "required": ["carro", "nome"]}}},
+    {"type": "function", "function": {"name": "prazo_cartao", "description": "AÇÃO: pôr/tirar a data de entrega (prazo) de um cartão do Trello. Sem data tira o prazo.", "parameters": {"type": "object", "properties": {"carro": {"type": "string"}, "data": {"type": "string", "description": "dd/mm/aaaa ou dd/mm"}, "horario": {"type": "string"}}, "required": ["carro"]}}},
+    {"type": "function", "function": {"name": "automacoes", "description": "Lista as automações do agente (cobranças, avisos, recados, relatórios, descrição do grupo) e se estão ligadas.", "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "automacao", "description": "AÇÃO: ligar ou desligar uma automação. Ex.: 'pausa os recados de preparação', 'religa a cobrança dos leads', 'para a agenda da manhã', 'desliga a descrição do grupo de vendas'.", "parameters": {"type": "object", "properties": {"nome": {"type": "string", "description": "nome ou descrição da automação"}, "ligar": {"type": "boolean"}}, "required": ["nome", "ligar"]}}},
+    {"type": "function", "function": {"name": "descricao_vendas", "description": "Descrição do grupo de vendas (ranking do mês). acao='ver' mostra; 'recado' põe um texto seu fixo no fim da descrição; 'limpar_recado' tira.", "parameters": {"type": "object", "properties": {"acao": {"type": "string", "enum": ["ver", "recado", "limpar_recado"]}, "texto": {"type": "string"}}}}},
+    {"type": "function", "function": {"name": "enviar_mensagem", "description": "AÇÃO: mandar uma mensagem pelo número do dono para alguém da equipe, um grupo ou um número. Pede confirmação mostrando o texto. Escreva o texto como o dono escreveria (curto, direto). Ex.: 'manda pro Carlos cobrar o resumo do Fit', 'avisa no grupo de entregas que amanhã não tem entrega'.", "parameters": {"type": "object", "properties": {"para": {"type": "string"}, "texto": {"type": "string"}}, "required": ["para", "texto"]}}},
+    {"type": "function", "function": {"name": "preparacao_aberta", "description": "Tarefas de preparação em aberto, por carro.", "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {
         "name": "corrigir_recall",
         "description": "AÇÃO: atualizar um recall (grupo RECALL): marcar pronto, na loja, agendar dia/hora, acrescentar motivo ou cancelar. Ex.: 'o recall do Duster ficou pronto', 'a T-Cross vem quinta 10h', 'cancela o recall da Twister'.",
@@ -1104,11 +1149,6 @@ TOOLS = [
             "cliente": {"type": "string"}, "veiculo": {"type": "string"}}},
     }},
     {"type": "function", "function": {
-        "name": "marcar_anunciado",
-        "description": "AÇÃO: marcar um carro como anunciado (sai da lista 'a anunciar'). Use quando o dono disser que anunciou/publicou.",
-        "parameters": {"type": "object", "properties": {"veiculo": {"type": "string"}}, "required": ["veiculo"]},
-    }},
-    {"type": "function", "function": {
         "name": "atualizar_venda",
         "description": "AÇÃO: corrigir/editar dados de uma venda existente (canal, valor, vendedor, forma de pagamento, financiado, troca, datas, cliente, status). Ex.: 'a venda do Denilson foi pelo tráfego', 'a do João foi 95 mil', 'a venda do C4 foi o Carlos'.",
         "parameters": {"type": "object", "properties": {
@@ -1122,14 +1162,6 @@ TOOLS = [
             "data_venda": {"type": "string"}, "data_entrega_prevista": {"type": "string"},
             "cliente_nome": {"type": "string", "description": "novo nome do cliente (se for corrigir o nome)"},
             "observacoes": {"type": "string"}}},
-    }},
-    {"type": "function", "function": {
-        "name": "atualizar_carro",
-        "description": "AÇÃO: editar um carro do estoque (preço, status, cor, km, ano). Ex.: 'muda o preço do Corolla pra 135 mil', 'o 208 é prata'.",
-        "parameters": {"type": "object", "properties": {
-            "veiculo": {"type": "string"}, "preco_anuncio": {"type": "number"},
-            "status": {"type": "string", "enum": ["a_anunciar", "anunciado", "reservado", "vendido", "entregue", "inativo"]},
-            "cor": {"type": "string"}, "km": {"type": "integer"}, "ano": {"type": "integer"}}, "required": ["veiculo"]},
     }},
     {"type": "function", "function": {
         "name": "criar_lembrete",
@@ -1176,12 +1208,6 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {"nome": {"type": "string"}}, "required": ["nome"]},
     }},
     {"type": "function", "function": {
-        "name": "listar_carros",
-        "description": "Lista carros do estoque por status, com preços. Use 'a_anunciar' p/ os que faltam anunciar.",
-        "parameters": {"type": "object", "properties": {
-            "status": {"type": "string", "enum": ["a_anunciar", "anunciado", "reservado", "vendido", "entregue"]}}},
-    }},
-    {"type": "function", "function": {
         "name": "pendencias",
         "description": "Carros/vendas pendentes: 'pagamento' (a receber) ou 'entrega' (a entregar).",
         "parameters": {"type": "object", "properties": {
@@ -1220,16 +1246,6 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {
             "cliente": {"type": "string", "description": "Nome do cliente"},
             "veiculo": {"type": "string", "description": "Carro (opcional, p/ desambiguar)"}}},
-    }},
-    {"type": "function", "function": {
-        "name": "giro_estoque",
-        "description": "Tempo de giro do estoque: quantos dias cada carro está parado (a anunciar/anunciado/reservado), média e os mais parados.",
-        "parameters": {"type": "object", "properties": {}},
-    }},
-    {"type": "function", "function": {
-        "name": "margem_estoque",
-        "description": "Margem real (venda − custo) das vendas ligadas a um carro do estoque, num período.",
-        "parameters": {"type": "object", "properties": {"periodo": _PERIODO}},
     }},
     {"type": "function", "function": {
         "name": "definir_meta",
@@ -1280,6 +1296,8 @@ LEMBRETES: criar_lembrete quando o dono pedir p/ ser lembrado (calcule 'quando' 
 SUPERVISOR: você é proativo. radar mostra os alertas abertos (carro encalhado, a receber parado, entrega atrasada, comparecimento baixo, sistema fora) — use quando perguntarem 'o que preciso resolver?'/'como está a operação?', e resolver_alerta p/ baixar um. anotar salva recado livre sem horário; listar_notas/resolver_nota gerenciam. pendências (listar_pendencias) mostra o que aguarda sua confirmação.
 SECRETÁRIA (assistido — você organiza, o DONO contata): lista_ligar_hoje dá quem ligar hoje (faltas de ontem, reservas paradas, entrega atrasada, a receber) com telefone — use em 'quem preciso contatar?'/'tem alguém pra ligar?'. mensagem_cobranca monta um texto pronto e educado de cobrança pra um cliente com saldo (ex 'manda uma cobrança pro João'); ENTREGUE o texto pro dono copiar/encaminhar e deixe claro que ele revisa e envia — você NUNCA manda direto pro cliente.
 LEADS (grupo Agendamento SDR — fonte oficial de visitas e negociações por telefone): use leads_abertos, buscar_lead e resumo_leads para qualquer pergunta sobre agendamentos, leads, SDRs, retorno de vendedor e cobranças. Tipos: Visita (horário na loja), Negociação telefone, Turno (horário e vendedor definidos).
+BUSCA: para qualquer coisa que não esteja nas outras ferramentas, ou para saber quem falou o quê, use buscar_mensagens. ESTOQUE = Trello (consultar_trello).
+LANÇAR/APAGAR: criar_venda, criar_lead, criar_entrega, registrar_pagamento, criar_avaliacao, apagar (pede ok). 'desfaz' → desfazer. Liga/desliga: automacoes/automacao. Mandar mensagem como o dono: enviar_mensagem (pede ok).
 CORREÇÕES PELO DONO: corrigir_recall, corrigir_lead, corrigir_entrega, valor_avaliacao, placa_venda, tarefa_preparacao (adicionar/concluir/remover), mover_cartao, criar_cartao, atualizar_venda, marcar_venda_caiu. Planilha e descrição do grupo se atualizam sozinhas. Quando a ferramenta devolver precisa_confirmar, diga ao dono exatamente o que vai ser feito e peça "ok" ou "não" — não diga que já fez. Se achar mais de um registro, mostre as opções e pergunte qual.
 COBRANÇAS A VENDEDORES: o agente ENVIA sim, pelo número do dono, depois da aprovação. Se o dono pedir para mandar mensagem/cobrança a um vendedor, NÃO diga que não envia: explique que basta responder à cobrança pendente com 'ok CÓDIGO', 'não CÓDIGO' ou 'texto novo: <mensagem>'.
 VENDAS do grupo: vendas_pendentes (sem resumo, resumo incompleto, reservas) e buscar_venda (detalhe de uma venda com comprovantes de pagamento).

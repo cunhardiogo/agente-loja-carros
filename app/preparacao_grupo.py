@@ -14,7 +14,7 @@ from .leads import _ascii, _dt, _iso, _quando, _stanza, _texto
 log = logging.getLogger("agente")
 
 PARADA_DIAS = 2
-RECADOS_ATIVOS = False  # pausado a pedido do dono (12/10) — só religar quando ele mandar
+RECADOS_ATIVOS = True  # liga/desliga de verdade: flag recados_preparacao (desligada desde 12/10)
 FELIPE = "5521994110597"
 PESSOAS = {"183863389221110@lid": "Daniel", "217982575837352@lid": "Caio", "248442551009535@lid": "Luiz Armando",
            "50427244589224@lid": "Felipe", "50852479930380@lid": "Igor"}

@@ -744,13 +744,18 @@ def texto_ranking(mes: str | None = None) -> str:
     if revenda:
         linhas.append("Revenda\n")
         linhas += [_linha_carro(v) for v in revenda]
+    from . import flags
+    extra = (flags.valor("descricao_vendas_texto") or "").strip()  # recado do dono no fim da descrição
+    if extra:
+        linhas.append("\n" + extra)
     return "\n".join(linhas)
 
 
 def atualizar_descricao(forcar: bool = False) -> bool:
     """Troca a descrição do grupo VENDAS quando o ranking do mês mudou (venda nova, venda que caiu)."""
     import time
-    if not DESCRICAO_ATIVA and not forcar:
+    from . import flags
+    if not (DESCRICAO_ATIVA and flags.ativo("descricao_vendas")) and not forcar:
         return False
     if not forcar and time.time() - _descricao["t"] < 60:
         return False
