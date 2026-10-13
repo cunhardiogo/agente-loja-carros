@@ -376,11 +376,11 @@ def lista_vendas(periodo: str = "tudo") -> dict:
 def listar_avaliacoes(periodo: str = "mes") -> dict:
     ini, fim = _range(periodo)
     rows = db.select_all("avaliacoes", {
-        "select": "modelo,versao,ano,km,placa,fipe,valor_pretendido,valor_avaliacao,"
-                  "carro_interesse,obs,created_at",
-        "order": "created_at.desc",
+        "select": "modelo,versao,ano,km,placa,fipe,valor_pretendido,valor_avaliacao,valor_texto,valor_por,status,"
+                  "carro_interesse,obs,avaliado_em",
+        "origem": "eq.grupo", "status": "neq.removida", "order": "avaliado_em.desc",
     })
-    rows = [r for r in rows if _dentro(r.get("created_at"), ini, fim)]
+    rows = [r for r in rows if _dentro(_fmt_data_sp(r["avaliado_em"]) if r.get("avaliado_em") else None, ini, fim)]
     return {"periodo": periodo, "quantidade": len(rows), "avaliacoes": rows}
 
 
@@ -554,8 +554,9 @@ def vendas_por_canal(periodo: str = "mes", data_inicio: str | None = None, data_
 
 def margem_avaliacoes(periodo: str = "mes", data_inicio: str | None = None, data_fim: str | None = None) -> dict:
     ini, fim = _resolve(periodo, data_inicio, data_fim)
-    rows = [r for r in db.select_all("avaliacoes", {"select": "modelo,fipe,valor_avaliacao,valor_pretendido,created_at"})
-            if _dentro(r.get("created_at"), ini, fim)]
+    rows = [r for r in db.select_all("avaliacoes", {"select": "modelo,fipe,valor_avaliacao,valor_pretendido,avaliado_em",
+                                                    "origem": "eq.grupo", "status": "neq.removida"})
+            if r.get("avaliado_em") and _dentro(_fmt_data_sp(r["avaliado_em"]), ini, fim)]
     itens, difs = [], []
     for r in rows:
         fipe, aval, pret = r.get("fipe"), r.get("valor_avaliacao"), r.get("valor_pretendido")

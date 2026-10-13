@@ -263,7 +263,7 @@ def leads(ini: str, fim: str) -> dict:
 # ===== entregas =====
 def entregas(ini: str, fim: str) -> dict:
     nomes = _nomes()
-    rows = db.select_all("entregas", {"select": "*", "removido": "eq.false"})
+    rows = db.select_all("entregas", {"select": "*", "removido": "eq.false", "origem": "in.(grupo,planilha)"})
     vendas_por_id = {v["id"]: v for v in _vendas()}
     feitas = [e for e in rows if e["status"] == "entregue" and _no(e.get("entregue_em"), ini, fim)]
     hoje = datas.hoje_iso()

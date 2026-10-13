@@ -360,6 +360,8 @@ def _rotear_evento(body: dict) -> dict:
         monitorado = ingest.grupo_por_jid(jid)
         if monitorado:  # arquivo pra busca do dono — antes de qualquer tratamento
             arquivo.arquivar(data, monitorado.get("nome"))
+            if monitorado.get("tipo") == "arquivo":  # grupo só guardado (ex.: Gerência), sem extração
+                return {"arquivado": message_id}
 
     # grupo de agendamento: formulário/resposta/nota viram lead (sem IA de extração nem mídia)
     if jid.endswith("@g.us") and not eh_assistente:
