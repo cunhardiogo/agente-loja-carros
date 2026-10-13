@@ -394,9 +394,14 @@ def _rotear_evento(body: dict) -> dict:
         if from_me:
             return {"ignored": "dm_propria"}  # evita reprocessar a resposta do bot
         numero = jid.split("@")[0]
-        autorizado = settings.meu_numero and numero == settings.meu_numero
-        if autorizado and (eh_assistente or not settings.evolution_assist_instance):
+        if jid.endswith("@lid"):  # contato que chega pelo lid: o número de verdade vem junto na chave
+            numero = (key.get("senderPn") or key.get("remoteJidAlt") or jid).split("@")[0]
+        pelo_assistente = eh_assistente or not settings.evolution_assist_instance
+        if settings.meu_numero and numero == settings.meu_numero and pelo_assistente:
             return _consulta(texto, numero)
+        operacional = flags.operacionais().get(numero)
+        if operacional and pelo_assistente:  # gerente com acesso operacional
+            return _consulta(texto, numero, papel="operacional", nome=operacional)
         return {"ignored": "dm_nao_autorizado"}
 
     # Grupos só são ingeridos pelo coletor, nunca pelo assistente
@@ -427,16 +432,16 @@ def _ingerir(grupo: dict, message_id: str | None, remetente: str | None,
     return res
 
 
-def _consulta(pergunta: str, numero: str):
+def _consulta(pergunta: str, numero: str, papel: str = "dono", nome: str = "Diogo"):
     try:
-        resposta = acoes.tentar_confirmar(pergunta)
-        if resposta is None:
+        resposta = acoes.tentar_confirmar(pergunta, numero)
+        if resposta is None and papel == "dono":  # aprovar cobrança é só do dono
             resposta = cobrancas.tentar_resolver(pergunta)
-        if resposta is None:
+        if resposta is None and papel == "dono":
             resposta = confirmacao.tentar_resolver(pergunta)
         if resposta is None:
             historico = consulta.carregar_historico(numero)
-            resposta = consulta.responder(pergunta, historico, numero)
+            resposta = consulta.responder(pergunta, historico, numero, papel=papel, nome=nome)
     except Exception:
         log.exception("erro na consulta")
         resposta = "Tive um problema ao consultar agora. Pode tentar de novo?"

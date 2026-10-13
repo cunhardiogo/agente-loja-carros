@@ -7,6 +7,7 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from . import db, trello
+from .config import settings
 from .leads import _ascii, _iso
 
 log = logging.getLogger("agente")
@@ -212,17 +213,24 @@ def criar_cartao(nome: str, lista: str = "estoque") -> dict:
 
 # ===== confirmação =====
 def _pedir(tipo: str, params: dict, descricao: str) -> dict:
-    db.update("acoes_pendentes", {"status": "cancelada"}, {"status": "eq.pendente"})  # só uma esperando por vez
-    db.insert("acoes_pendentes", {"tipo": tipo, "params": params, "descricao": descricao})
+    from .consulta import _ctx as ctx
+    for velha in db.select("acoes_pendentes", {"select": "id,numero", "status": "eq.pendente"}):  # uma por pessoa
+        if (velha.get("numero") or settings.meu_numero) == (ctx.get("numero") or settings.meu_numero):
+            db.update("acoes_pendentes", {"status": "cancelada"}, {"id": f"eq.{velha['id']}"})
+    from .consulta import _ctx
+    db.insert("acoes_pendentes", {"tipo": tipo, "params": params, "descricao": descricao, "numero": _ctx.get("numero")})
     return {"precisa_confirmar": True, "acao": descricao,
             "instrucao": "Peça ao dono para responder 'ok' para confirmar ou 'não' para cancelar."}
 
 
-def tentar_confirmar(texto: str) -> str | None:
-    """'ok' / 'não' logo depois de um pedido de confirmação. None = não é resposta a uma ação pendente."""
+def tentar_confirmar(texto: str, numero: str | None = None) -> str | None:
+    """'ok' / 'não' logo depois de um pedido de confirmação. None = não é resposta a uma ação pendente.
+    Cada pessoa só confirma o que ela mesma pediu."""
+    numero = numero or settings.meu_numero
     desde = _iso(datetime.now(timezone.utc) - timedelta(minutes=30))
-    pend = db.select("acoes_pendentes", {"select": "*", "status": "eq.pendente", "created_at": f"gte.{desde}",
-                                         "order": "created_at.desc", "limit": "1"})
+    pend = [p for p in db.select("acoes_pendentes", {"select": "*", "status": "eq.pendente", "created_at": f"gte.{desde}",
+                                                     "order": "created_at.desc", "limit": "10"})
+            if (p.get("numero") or settings.meu_numero) == numero][:1]
     if not pend:
         return None
     r = _ascii(texto).strip(" .!")
@@ -238,6 +246,13 @@ def tentar_confirmar(texto: str) -> str | None:
         log.exception("falha executando ação pendente")
         return f"Não consegui {a['descricao']}: {e}"
     db.update("acoes_pendentes", {"status": "feita"}, {"id": f"eq.{a['id']}"})
+    if numero != settings.meu_numero:
+        from . import evolution, flags
+        try:
+            evolution.enviar_texto(settings.meu_numero,
+                                   f"📝 {flags.operacionais().get(numero, numero)} confirmou: {a['descricao']}")
+        except Exception:
+            log.exception("falha avisando o dono")
     return f"✅ Feito: {a['descricao']}."
 
 
@@ -268,12 +283,17 @@ def _executar(a: dict) -> None:
 
 
 # ===== histórico e desfazer =====
+def _autor() -> str:
+    from .consulta import _ctx
+    return _ctx.get("nome") or "Diogo"
+
+
 def _alterar(tabela: str, row: dict, upd: dict, descricao: str) -> None:
     """Atualiza guardando o valor anterior dos campos, pra 'desfaz' voltar."""
     db.update(tabela, upd, {"id": f"eq.{row['id']}"})
     try:
         db.insert("acoes_log", {"tabela": tabela, "registro_id": str(row["id"]), "descricao": descricao,
-                                "antes": {k: row.get(k) for k in upd}, "depois": upd})
+                                "antes": {k: row.get(k) for k in upd}, "depois": upd, "autor": _autor()})
     except Exception:
         log.exception("falha registrando histórico da ação")
 
@@ -281,7 +301,7 @@ def _alterar(tabela: str, row: dict, upd: dict, descricao: str) -> None:
 def _criado(tabela: str, row: dict, descricao: str) -> None:
     try:
         db.insert("acoes_log", {"tabela": tabela, "registro_id": str(row["id"]), "descricao": descricao,
-                                "antes": None, "depois": {"criado": True}})
+                                "antes": None, "depois": {"criado": True}, "autor": _autor()})
     except Exception:
         log.exception("falha registrando histórico da ação")
 
@@ -297,9 +317,10 @@ def _marcar_sujo(tabela: str) -> None:
 
 
 def historico_acoes(limite: int = 10) -> dict:
-    rows = db.select("acoes_log", {"select": "descricao,desfeito,created_at", "order": "created_at.desc",
+    rows = db.select("acoes_log", {"select": "descricao,desfeito,created_at,autor", "order": "created_at.desc",
                                    "limit": str(limite)})
-    return {"acoes": [{"quando": r["created_at"][:16], "o_que": r["descricao"], "desfeita": r["desfeito"]}
+    return {"acoes": [{"quando": r["created_at"][:16], "quem": r.get("autor") or "Diogo", "o_que": r["descricao"],
+                       "desfeita": r["desfeito"]}
                       for r in rows]}
 
 

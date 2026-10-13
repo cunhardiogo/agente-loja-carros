@@ -50,5 +50,15 @@ def definir(nome: str, ativo: bool | None = None, valor: str | None = None) -> N
     _cache["t"] = 0.0
 
 
+def operacionais() -> dict[str, str]:
+    """Números com acesso operacional (gerente): config 'acesso_operacional' = "5521...:Felipe, 5521...:Igor"."""
+    out = {}
+    for item in (valor("acesso_operacional") or "").split(","):
+        num, _, nome = item.strip().partition(":")
+        if num.strip():
+            out[num.strip()] = nome.strip() or "gerente"
+    return out
+
+
 def situacao() -> list[dict]:
     return [{"automacao": n, "ligada": ativo(n), "o_que_faz": d} for n, (_, d) in AUTOMACOES.items()]

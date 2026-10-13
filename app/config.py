@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     trello_board: str = ""
     # link de avaliação no Google (vai na mensagem de pós-venda, se configurado)
     google_review_url: str = ""
+    autocerto_base: str = "https://integracao.autocerto.com"
+    autocerto_user: str = ""
+    autocerto_pass: str = ""
+    autocerto_unidade: int = 1824  # estoque real do site (a 3049 é cadastro antigo)
+    autocerto_unidades: str = ""   # várias lojas no mesmo login: "1824,3050"
     # alternativa à conta de serviço: cliente OAuth + refresh token (autorizado uma vez)
     google_client_id: str = ""
     google_client_secret: str = ""

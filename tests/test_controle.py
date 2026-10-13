@@ -57,3 +57,24 @@ def test_desfazer_volta_valor_e_criacao(monkeypatch):
 
 def test_dias_no_quadro_pelo_id_do_cartao():
     assert controle._dias_no_quadro("00000000aaaaaaaaaaaaaaaa") > 10000
+
+
+def test_gerente_nao_ve_ferramentas_do_dono():
+    from app import consulta
+    nomes = {t["function"]["name"] for t in consulta._ferramentas("operacional")}
+    assert "apagar" not in nomes and "enviar_mensagem" not in nomes and "automacao" not in nomes
+    assert {"corrigir_lead", "criar_venda", "buscar_mensagens", "estoque_precos"} <= nomes
+    assert len(consulta._ferramentas("dono")) == len(consulta.TOOLS)
+
+
+def test_cada_um_confirma_so_o_que_pediu(monkeypatch):
+    pend = [{"id": "f1", "numero": "5521994110597", "tipo": "x", "params": {}, "descricao": "mover Civic"}]
+    feitos = []
+    monkeypatch.setattr(acoes.db, "select", lambda t, p=None: pend)
+    monkeypatch.setattr(acoes.db, "update", lambda *a: None)
+    monkeypatch.setattr(acoes, "_executar", lambda a: feitos.append(a["id"]))
+    monkeypatch.setattr(acoes.settings, "meu_numero", "5521980994895")
+    assert acoes.tentar_confirmar("ok", "5521980994895") is None   # o dono não confirma o pedido do Felipe
+    import app.evolution as ev
+    monkeypatch.setattr(ev, "enviar_texto", lambda n, t: None)
+    assert acoes.tentar_confirmar("ok", "5521994110597").startswith("✅") and feitos == ["f1"]

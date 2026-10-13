@@ -16,7 +16,11 @@ if settings.openai_base_url:  # LLM plugável: endpoint compatível-OpenAI
     _kwargs["base_url"] = settings.openai_base_url
 _client = OpenAI(**_kwargs) if settings.openai_api_key else None
 
-_ctx = {"numero": None}  # quem está conversando (p/ lembretes irem pra pessoa certa)
+_ctx = {"numero": None, "papel": "dono", "nome": "Diogo"}  # quem está conversando
+
+# acesso operacional (gerente): consulta tudo e corrige a operação; isto fica só com o dono
+SO_DONO = {"apagar", "desfazer", "automacao", "enviar_mensagem", "definir_meta", "resolver_alerta", "anotar",
+           "resolver_nota", "listar_notas", "criar_lembrete", "listar_lembretes", "listar_pendencias"}
 
 
 # ===== helpers =====
@@ -906,6 +910,7 @@ def _fmt_data_sp(iso: str) -> str:
 
 
 DISPATCH = {
+    "estoque_precos": lambda **k: __import__("app.autocerto", fromlist=["x"]).consultar(**k),
     "buscar_mensagens": lambda **k: __import__("app.arquivo", fromlist=["x"]).buscar(**k),
     "criar_venda": lambda **k: __import__("app.controle", fromlist=["x"]).criar_venda(**k),
     "criar_lead": lambda **k: __import__("app.controle", fromlist=["x"]).criar_lead(**k),
@@ -981,6 +986,7 @@ _DI = {"type": "string", "description": "Data início ISO YYYY-MM-DD (opcional, 
 _DF = {"type": "string", "description": "Data fim ISO YYYY-MM-DD (opcional)"}
 
 TOOLS = [
+    {"type": "function", "function": {"name": "estoque_precos", "description": "Estoque do Autocerto com PREÇO: carro, ano, km, cor, câmbio, placa, preço, há quantos dias está cadastrado e onde está no Trello. Use para 'quanto está o Corolla?', 'carros até 60 mil', 'estoque com preços', 'valor total do estoque', 'carro mais antigo no estoque'. Não tem custo (margem não dá).", "parameters": {"type": "object", "properties": {"termo": {"type": "string", "description": "modelo, marca, ano, cor ou placa"}, "preco_min": {"type": "number"}, "preco_max": {"type": "number"}, "ordem": {"type": "string", "enum": ["preco", "dias", "km", "ano"], "description": "dias = mais parados primeiro"}}}}},
     {"type": "function", "function": {"name": "buscar_mensagens", "description": "Busca em TODAS as mensagens dos grupos e conversas monitoradas (vendas, agendamento, entregas, preparação, fotos, avaliações, recall, gerência, marketing, tráfego, conversas com Felipe/Igor/Caio). Use para 'o que o Felipe falou do Civic', 'quem mandou o comprovante do Fastback', 'o que rolou hoje na gerência', 'procura TUL-5J38'. Sem termo traz as últimas da conversa. 'O Felipe me falou/me mandou' = conversa privada: conversa='Felipe' (Igor e Caio idem); 'o Felipe falou no grupo' = pessoa='Felipe'. Resuma o que achou e diga quem/quando/onde.", "parameters": {"type": "object", "properties": {"termo": {"type": "string", "description": "palavras a procurar (todas precisam aparecer)"}, "conversa": {"type": "string", "description": "parte do nome do grupo/conversa (ex: gerencia, vendas, felipe)"}, "pessoa": {"type": "string", "description": "quem mandou"}, "dias": {"type": "integer", "description": "padrão 30"}}}}},
     {"type": "function", "function": {"name": "criar_venda", "description": "AÇÃO: lançar uma venda ou reserva que não foi postada no grupo. Ex.: 'lança venda do Carlos: Onix 2019 placa RKC1A23, cliente João, 65 mil à vista', 'o Yan reservou o Pulse'.", "parameters": {"type": "object", "properties": {"vendedor": {"type": "string"}, "carro": {"type": "string"}, "ano": {"type": "integer"}, "placa": {"type": "string"}, "cliente": {"type": "string"}, "valor": {"type": "string"}, "data": {"type": "string", "description": "dd/mm/aaaa ou dd/mm"}, "reserva": {"type": "boolean"}, "revenda": {"type": "boolean"}, "forma_pagamento": {"type": "string"}, "canal": {"type": "string"}}, "required": ["vendedor", "carro"]}}},
     {"type": "function", "function": {"name": "criar_lead", "description": "AÇÃO: lançar um lead/agendamento que não veio pelo grupo. Ex.: 'agenda a Maria pro Edson amanhã 15h, quer o Compass, 21999998888'.", "parameters": {"type": "object", "properties": {"cliente": {"type": "string"}, "vendedor": {"type": "string"}, "carro": {"type": "string"}, "telefone": {"type": "string"}, "data": {"type": "string", "description": "dd/mm/aaaa ou dd/mm"}, "horario": {"type": "string"}, "tipo": {"type": "string", "enum": ["Visita", "Negociação telefone", "Turno"]}, "observacao": {"type": "string"}}, "required": ["cliente"]}}},
@@ -1296,7 +1302,7 @@ LEMBRETES: criar_lembrete quando o dono pedir p/ ser lembrado (calcule 'quando' 
 SUPERVISOR: você é proativo. radar mostra os alertas abertos (carro encalhado, a receber parado, entrega atrasada, comparecimento baixo, sistema fora) — use quando perguntarem 'o que preciso resolver?'/'como está a operação?', e resolver_alerta p/ baixar um. anotar salva recado livre sem horário; listar_notas/resolver_nota gerenciam. pendências (listar_pendencias) mostra o que aguarda sua confirmação.
 SECRETÁRIA (assistido — você organiza, o DONO contata): lista_ligar_hoje dá quem ligar hoje (faltas de ontem, reservas paradas, entrega atrasada, a receber) com telefone — use em 'quem preciso contatar?'/'tem alguém pra ligar?'. mensagem_cobranca monta um texto pronto e educado de cobrança pra um cliente com saldo (ex 'manda uma cobrança pro João'); ENTREGUE o texto pro dono copiar/encaminhar e deixe claro que ele revisa e envia — você NUNCA manda direto pro cliente.
 LEADS (grupo Agendamento SDR — fonte oficial de visitas e negociações por telefone): use leads_abertos, buscar_lead e resumo_leads para qualquer pergunta sobre agendamentos, leads, SDRs, retorno de vendedor e cobranças. Tipos: Visita (horário na loja), Negociação telefone, Turno (horário e vendedor definidos).
-BUSCA: para qualquer coisa que não esteja nas outras ferramentas, ou para saber quem falou o quê, use buscar_mensagens. ESTOQUE = Trello (consultar_trello).
+BUSCA: para qualquer coisa que não esteja nas outras ferramentas, ou para saber quem falou o quê, use buscar_mensagens. ESTOQUE = Trello (consultar_trello: onde está, checklist); PREÇO e dias de estoque = estoque_precos (Autocerto).
 LANÇAR/APAGAR: criar_venda, criar_lead, criar_entrega, registrar_pagamento, criar_avaliacao, apagar (pede ok). 'desfaz' → desfazer. Liga/desliga: automacoes/automacao. Mandar mensagem como o dono: enviar_mensagem (pede ok).
 CORREÇÕES PELO DONO: corrigir_recall, corrigir_lead, corrigir_entrega, valor_avaliacao, placa_venda, tarefa_preparacao (adicionar/concluir/remover), mover_cartao, criar_cartao, atualizar_venda, marcar_venda_caiu. Planilha e descrição do grupo se atualizam sozinhas. Quando a ferramenta devolver precisa_confirmar, diga ao dono exatamente o que vai ser feito e peça "ok" ou "não" — não diga que já fez. Se achar mais de um registro, mostre as opções e pergunte qual.
 COBRANÇAS A VENDEDORES: o agente ENVIA sim, pelo número do dono, depois da aprovação. Se o dono pedir para mandar mensagem/cobrança a um vendedor, NÃO diga que não envia: explique que basta responder à cobrança pendente com 'ok CÓDIGO', 'não CÓDIGO' ou 'texto novo: <mensagem>'.
@@ -1376,11 +1382,36 @@ def _compactar_memoria(numero: str) -> None:
         db.delete("conversas", {"numero": f"eq.{numero}", "id": f"in.({','.join(lote)})"})
 
 
-def responder(pergunta: str, historico: list | None = None, numero: str | None = None) -> str:
+def _ferramentas(papel: str) -> list[dict]:
+    return TOOLS if papel == "dono" else [t for t in TOOLS if t["function"]["name"] not in SO_DONO]
+
+
+def _avisar_dono(nome_tool: str, args: dict, resultado: dict) -> None:
+    """Alteração feita por quem tem acesso operacional → o dono fica sabendo na hora."""
+    from . import evolution
+    try:
+        evolution.enviar_texto(settings.meu_numero,
+                               f"📝 {_ctx['nome']} pediu ao agente: {nome_tool}\n"
+                               f"{json.dumps(args, ensure_ascii=False)}\n→ {json.dumps(resultado, ensure_ascii=False, default=str)[:600]}")
+    except Exception:
+        log.exception("falha avisando o dono")
+
+
+def responder(pergunta: str, historico: list | None = None, numero: str | None = None,
+              papel: str = "dono", nome: str = "Diogo") -> str:
     if _client is None:
         return "IA não configurada (falta OPENAI_API_KEY)."
-    _ctx["numero"] = numero
+    _ctx.update({"numero": numero, "papel": papel, "nome": nome})
+    ferramentas = _ferramentas(papel)
+    permitidas = {t["function"]["name"] for t in ferramentas}
+    acao = {t["function"]["name"] for t in ferramentas if t["function"]["description"].startswith("AÇÃO")}
     sistema = _system_dinamico()
+    if papel != "dono":
+        sistema += (f"\n\nATENÇÃO: quem está falando agora NÃO é o dono, é {nome} (gerente, acesso operacional). "
+                    f"Chame-o pelo nome. Ele pode consultar tudo e corrigir/lançar a operação. Ele NÃO pode apagar "
+                    f"registros, desfazer, ligar/desligar automações, mudar a descrição do grupo, mandar mensagem pelo "
+                    f"número do Diogo, nem mexer em metas, notas e lembretes do Diogo — se pedir, diga que só o Diogo pode. "
+                    f"Toda alteração dele é avisada ao Diogo.")
     resumo = carregar_resumo(numero) if numero else ""
     if resumo:
         sistema += f"\n\nRESUMO DA CONVERSA ATÉ AQUI:\n{resumo}"
@@ -1389,7 +1420,7 @@ def responder(pergunta: str, historico: list | None = None, numero: str | None =
     messages.append({"role": "user", "content": pergunta})
     for _ in range(5):
         resp = _client.chat.completions.create(
-            model=settings.openai_model_consulta, messages=messages, tools=TOOLS,
+            model=settings.openai_model_consulta, messages=messages, tools=ferramentas,
             tool_choice="auto", temperature=0,
         )
         msg = resp.choices[0].message
@@ -1399,7 +1430,15 @@ def responder(pergunta: str, historico: list | None = None, numero: str | None =
         for tc in msg.tool_calls:
             try:
                 args = json.loads(tc.function.arguments or "{}")
-                resultado = DISPATCH[tc.function.name](**args)
+                nome_tool = tc.function.name
+                if nome_tool not in permitidas or (papel != "dono" and nome_tool == "descricao_vendas"
+                                                    and args.get("acao", "ver") != "ver"):
+                    resultado = {"erro": "só o Diogo pode fazer isso"}
+                else:
+                    resultado = DISPATCH[nome_tool](**args)
+                    if papel != "dono" and nome_tool in acao and isinstance(resultado, dict) \
+                            and resultado.get("ok"):
+                        _avisar_dono(nome_tool, args, resultado)
             except Exception as e:
                 resultado = {"erro": str(e)}
             messages.append({"role": "tool", "tool_call_id": tc.id,
