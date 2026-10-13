@@ -149,7 +149,8 @@ def vendas(ini: str, fim: str) -> dict:
                                                                         or v.get("updated_at"), ini, fim)]
     por_vend: dict = defaultdict(lambda: {"vendas": 0, "faturamento": 0.0})
     for v in loja:
-        p = por_vend[nomes.get(v.get("vendedor_id"), "Sem vendedor")]
+        from .preparacao_grupo import PESSOAS
+        p = por_vend[nomes.get(v.get("vendedor_id")) or PESSOAS.get(v.get("autor") or "", "Sem vendedor")]
         p["vendas"] += 1
         p["faturamento"] += total(v)
     for p in por_vend.values():
