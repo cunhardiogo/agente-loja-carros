@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Painel Grupo SB</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,0.10);
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+    --seq-250: #86b6ef; --seq-350: #5598e7; --seq-450: #2a78d6; --seq-550: #1c5cab; --seq-650: #104281;
+    --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b; --good-text: #006300;
+    --neutral: #f0efec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+      --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+      --seq-250: #86b6ef; --seq-350: #5598e7; --seq-450: #3987e5; --seq-550: #256abf; --seq-650: #184f95;
+      --good-text: #0ca30c; --neutral: #383835;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --seq-250: #86b6ef; --seq-350: #5598e7; --seq-450: #3987e5; --seq-550: #256abf; --seq-650: #184f95;
+    --good-text: #0ca30c; --neutral: #383835;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; padding: 16px 24px; border-bottom: 1px solid var(--ring); flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 650; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  .grow { flex: 1; }
+  .tabs { display: flex; gap: 4px; padding: 12px 24px 0; flex-wrap: wrap; }
+  .tab { border: 1px solid var(--ring); background: transparent; color: var(--ink-2); padding: 7px 14px; border-radius: 999px; cursor: pointer; font: inherit; }
+  .tab[aria-selected="true"] { background: var(--ink); color: var(--page); border-color: var(--ink); }
+  select, .btn { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--ring); border-radius: 8px; padding: 6px 10px; }
+  .btn { cursor: pointer; }
+  main { padding: 16px 24px 48px; }
+  .page { display: none; } .page.on { display: block; }
+  .grid { display: grid; gap: 16px; }
+  .g4 { grid-template-columns: repeat(4, minmax(0,1fr)); }
+  .g3 { grid-template-columns: repeat(3, minmax(0,1fr)); }
+  .g2 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  @media (max-width: 1100px) { .g4 { grid-template-columns: repeat(2, minmax(0,1fr)); } .g3, .g2 { grid-template-columns: 1fr; } }
+  @media (max-width: 560px) { main, header, .tabs { padding-left: 16px; padding-right: 16px; } .g4 { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--ring); border-radius: 12px; padding: 16px; min-width: 0; }
+  .card h2 { font-size: 14px; margin: 0 0 2px; font-weight: 650; }
+  .card .desc { color: var(--muted); font-size: 12px; margin: 0 0 12px; }
+  .tile .lbl { color: var(--ink-2); font-size: 13px; }
+  .tile .val { font-size: 30px; font-weight: 650; margin: 4px 0 2px; letter-spacing: -0.01em; }
+  .tile .meta { color: var(--muted); font-size: 12px; }
+  .bar { height: 6px; background: var(--neutral); border-radius: 4px; margin-top: 10px; overflow: hidden; }
+  .bar > span { display: block; height: 100%; background: var(--s1); border-radius: 4px; }
+  .delta-good { color: var(--good-text); } .delta-bad { color: var(--critical); }
+  .status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  td { padding: 8px; border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.num, th.num { text-align: right; }
+  .scroll { overflow-x: auto; }
+  .alert { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--grid); align-items: flex-start; }
+  .alert:last-child { border-bottom: 0; }
+  .alert .ico { font-size: 14px; line-height: 20px; }
+  .alert b { font-weight: 600; }
+  .alert small { color: var(--muted); display: block; }
+  svg text { fill: var(--muted); font-size: 11px; font-family: system-ui, sans-serif; }
+  svg .lbl-ink { fill: var(--ink-2); font-size: 12px; }
+  #tip { position: fixed; pointer-events: none; background: var(--ink); color: var(--page); font-size: 12px; padding: 6px 9px; border-radius: 6px; opacity: 0; transition: opacity .08s; z-index: 10; white-space: nowrap; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--ink-2); margin-bottom: 8px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+  .pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--ring); color: var(--ink-2); }
+  .mock { font-size: 12px; color: var(--muted); border: 1px dashed var(--axis); padding: 4px 10px; border-radius: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Painel Grupo SB</h1>
+    <div class="sub" id="sub">carregando dados reais…</div>
+  </div>
+  <div class="grow"></div>
+  <select id="periodo" aria-label="Período">
+    <option value="mes">Mês atual</option><option value="semana">Semana atual</option>
+    <option value="mes_passado">Mês passado</option><option value="30d">Últimos 30 dias</option>
+    <option value="90d">Últimos 90 dias</option><option value="ano">Ano</option>
+  </select>
+  <button class="btn" id="tema" type="button">Tema</button>
+</header>
+<nav class="tabs" role="tablist">
+  <button class="tab" role="tab" aria-selected="true" data-p="dono">Visão do dono</button>
+  <button class="tab" role="tab" aria-selected="false" data-p="vendas">Vendas</button>
+  <button class="tab" role="tab" aria-selected="false" data-p="leads">Leads & funil</button>
+  <button class="tab" role="tab" aria-selected="false" data-p="equipe">Equipe</button>
+  <button class="tab" role="tab" aria-selected="false" data-p="estoque">Estoque & operação</button>
+  <button class="tab" role="tab" aria-selected="false" data-p="compra">Avaliações & recall</button>
+  <button class="tab" role="tab" aria-selected="false" data-p="conversas">Conversas & marketing</button>
+</nav>
+<main id="main"><p class="desc">Calculando as métricas (leva uns 20 segundos na primeira vez)…</p></main>
+<div id="tip"></div>
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const brl = n => n == null ? "—" : "R$ " + Math.round(n).toLocaleString("pt-BR");
+const num = n => n == null ? "—" : (+n).toLocaleString("pt-BR");
+const pct = n => n == null ? "—" : n.toLocaleString("pt-BR") + "%";
+const tip = $("#tip");
+function hover(el, html) {
+  el.addEventListener("mousemove", e => { tip.innerHTML = html; tip.style.opacity = 1; tip.style.left = (e.clientX + 12) + "px"; tip.style.top = (e.clientY - 34) + "px"; });
+  el.addEventListener("mouseleave", () => tip.style.opacity = 0);
+}
+const NS = "http://www.w3.org/2000/svg";
+function svg(w, h) { const s = document.createElementNS(NS, "svg"); s.setAttribute("viewBox", `0 0 ${w} ${h}`); s.setAttribute("width", "100%"); s.style.display = "block"; return s; }
+function el(tag, attrs, parent) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+function txt(parent, x, y, t, attrs = {}) { const e = el("text", { x, y, ...attrs }, parent); e.textContent = t; return e; }
+function hbar(parent, x, y, w, h, fill) {
+  const r = Math.min(4, w / 2, h / 2);
+  return el("path", { d: `M${x},${y} H${x + w - r} Q${x + w},${y} ${x + w},${y + r} V${y + h - r} Q${x + w},${y + h} ${x + w - r},${y + h} H${x} Z`, fill }, parent);
+}
+function vbar(parent, x, y, w, h, fill) {
+  const r = Math.min(4, w / 2, h / 2);
+  return el("path", { d: `M${x},${y + h} V${y + r} Q${x},${y} ${x + r},${y} H${x + w - r} Q${x + w},${y} ${x + w},${y + r} V${y + h} Z`, fill }, parent);
+}
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/* ---------- blocos ---------- */
+const tile = (lbl, val, meta = "") => `<div class="card tile"><div class="lbl">${lbl}</div><div class="val">${val}</div><div class="meta">${meta}</div></div>`;
+const card = (titulo, desc, corpo, extra = "") => `<div class="card" ${extra}><h2>${titulo}</h2><p class="desc">${desc}</p>${corpo}</div>`;
+let nCh = 0;
+const chart = () => `ch${++nCh}`;
+const fila = [];
+function barras(dados, fmt = v => num(v), cor = "var(--s1)") {
+  const id = chart();
+  fila.push(() => {
+    const alvo = $("#" + id);
+    const d = dados.filter(x => x[1] != null);
+    if (!d.length) { alvo.innerHTML = `<p class="desc">sem dados no período</p>`; return; }
+    const max = Math.max(...d.map(x => x[1]), 1);
+    const W = 820, rowH = 30, L = 190, H = d.length * rowH + 4, s = svg(W, H);
+    d.forEach(([n, v], i) => {
+      const w = v / max * (W - L - 90), y0 = i * rowH + 4;
+      txt(s, L - 10, y0 + 15, String(n).slice(0, 34), { class: "lbl-ink", "text-anchor": "end" });
+      const b = hbar(s, L, y0, Math.max(w, 2), 20, cor);
+      txt(s, L + w + 8, y0 + 15, fmt(v), { class: "lbl-ink" });
+      hover(b, `<b>${esc(n)}</b>: ${fmt(v)}`);
+    });
+    alvo.appendChild(s);
+  });
+  return `<div id="${id}"></div>`;
+}
+function colunas(serie, rotulo = "") {  // série diária {AAAA-MM-DD: n}
+  const id = chart();
+  fila.push(() => {
+    const alvo = $("#" + id), ks = Object.keys(serie || {}).sort();
+    if (!ks.length) { alvo.innerHTML = `<p class="desc">sem dados no período</p>`; return; }
+    const ini = new Date(ks[0] + "T12:00"), fim = new Date(ks[ks.length - 1] + "T12:00"), dias = [];
+    for (let d = new Date(ini); d <= fim; d.setDate(d.getDate() + 1)) dias.push(d.toISOString().slice(0, 10));
+    const vals = dias.map(d => serie[d] || 0), max = Math.max(...vals, 1);
+    const W = 560, H = 190, L = 28, B = 22, T = 8, bw = (W - L - 8) / dias.length, s = svg(W, H), y = v => T + (1 - v / max) * (H - T - B);
+    [0, Math.ceil(max / 2), max].forEach(v => { el("line", { x1: L, x2: W, y1: y(v), y2: y(v), stroke: "var(--grid)" }, s); txt(s, L - 6, y(v) + 4, v, { "text-anchor": "end" }); });
+    dias.forEach((d, i) => {
+      const x0 = L + i * bw + 1, w = Math.max(bw - 2, 1), v = vals[i];
+      if (v) vbar(s, x0, y(v), w, y(0) - y(v), "var(--s1)");
+      const g = el("rect", { x: x0, y: T, width: w, height: H - T - B, fill: "transparent" }, s);
+      hover(g, `${d.slice(8)}/${d.slice(5, 7)} · <b>${v}</b> ${rotulo}`);
+      if (i % Math.ceil(dias.length / 8) === 0) txt(s, x0 + w / 2, H - 6, `${d.slice(8)}/${d.slice(5, 7)}`, { "text-anchor": "middle" });
+    });
+    alvo.appendChild(s);
+  });
+  return `<div id="${id}"></div>`;
+}
+const ent = (o, f = v => v) => Object.entries(o || {}).map(([k, v]) => [k, f(v)]);
+const tabela = (cab, linhas) => `<div class="scroll"><table><thead><tr>${cab.map((c, i) => `<th class="${i ? "num" : ""}">${c}</th>`).join("")}</tr></thead><tbody>${linhas.map(l => `<tr>${l.map((c, i) => `<td class="${i ? "num" : ""}">${c}</td>`).join("")}</tr>`).join("") || `<tr><td>sem dados</td></tr>`}</tbody></table></div>`;
+const sinal = (ok, txtOk, txtRuim) => `<span class="status"><span class="dot" style="background:var(${ok ? "--good" : "--serious"})"></span>${ok ? txtOk : txtRuim}</span>`;
+
+/* ---------- páginas ---------- */
+function paginas(m) {
+  const v = m.vendas || {}, l = m.leads || {}, e = m.entregas || {}, p = m.preparacao || {}, es = m.estoque || {}, ac = es.autocerto || {},
+    av = m.avaliacoes || {}, r = m.recall || {}, mk = m.marketing || {}, c = m.comunicacao || {}, eq = m.equipe || {}, f = m.funil || {};
+  const ar = v.a_receber || {};
+  const alertas = [];
+  if (e.atrasadas) alertas.push(["🔴", `${e.atrasadas} entregas com data vencida no quadro`, "conferir se já foram entregues ou remarcar"]);
+  if (l.sem_retorno) alertas.push(["🟠", `${l.sem_retorno} leads sem nenhum retorno do vendedor`, `retorno mediano ${num(l.retorno_mediano_min)} min`]);
+  if (v.sem_resumo || v.resumo_com_pendencia) alertas.push(["🟠", `${v.sem_resumo || 0} vendas sem resumo · ${v.resumo_com_pendencia || 0} com campo faltando`, Object.keys(v.campos_mais_faltando || {}).slice(0, 4).join(", ")]);
+  if (p.paradas_2_dias) alertas.push(["🟡", `${p.paradas_2_dias} tarefas de preparação paradas há 2+ dias`, `${p.tarefas_concluidas || 0} concluídas no período`]);
+  if (ac.valor_parado_mais_90_dias) alertas.push(["🟡", `${brl(ac.valor_parado_mais_90_dias)} em carros com mais de 90 dias`, `${(ac.por_idade || {})["mais de 90 dias"] || 0} carros`]);
+  if (r.abertos) alertas.push(["🟡", `${r.abertos} recall em aberto`, ent(r.abertos_por_status).map(([k, n]) => `${n} ${k}`).join(" · ")]);
+  if (es.no_autocerto_sem_cartao) alertas.push(["⚪", `${es.no_autocerto_sem_cartao} carros do Autocerto sem cartão no Trello`, `${es.cartoes_sem_placa || 0} cartões sem placa`]);
+  if (mk.erro) alertas.push(["⚪", "Meta Ads sem dados", mk.erro]);
+
+  return {
+    dono: `
+      <div class="grid g4">
+        ${tile("Vendidos", num(v.vendidos), `${num(v.revenda)} revenda à parte · ${num(v.caidas)} caíram`)}
+        ${tile("Faturamento", brl(v.faturamento), `ticket médio ${brl(v.ticket_medio)}`)}
+        ${tile("A receber", brl(ar.total_a_receber), `banco ${brl(ar.financiamento_banco)} · à vista ${brl(ar.a_vista)}`)}
+        ${tile("Estoque anunciado", num(ac.carros) + " carros", `${brl(ac.valor_total)} · idade mediana ${num(ac.idade_mediana_dias)} dias`)}
+      </div>
+      <div class="grid g4" style="margin-top:16px">
+        ${tile("Leads recebidos", num(l.recebidos), `conversão ${pct(l.conversao_pct)}`)}
+        ${tile("Comparecimento", pct(l.comparecimento_pct), `${num(l.compareceram)} de ${num(l.visitas_agendadas_passadas)} visitas`)}
+        ${tile("Entregas feitas", num(e.entregues), `no prazo ${pct(e.no_prazo_pct)} · ${num(e.abertas)} no quadro`)}
+        ${tile("Avaliações", num(av.avaliacoes), `valor em ${num(av.minutos_ate_valor)} min (mediana) · ${pct(av.valor_medio_pct_fipe)} da FIPE`)}
+      </div>
+      <div class="grid g2" style="margin-top:16px">
+        ${card("Vendas por dia", "pela data da venda", colunas(v.serie_diaria, "vendas"))}
+        ${card("Atenção", "o que precisa de ação agora", alertas.map(([i, t, s]) => `<div class="alert"><span class="ico">${i}</span><div><b>${esc(t)}</b><small>${esc(s)}</small></div></div>`).join("") || `<p class="desc">nada pendente</p>`)}
+      </div>
+      <div class="grid g2" style="margin-top:16px">
+        ${card("Funil", "leads → visitas que vieram → vendas → entregas", barras([["Leads", f.leads], ["Vieram à loja", f.visitas_que_vieram], ["Vendas", f.vendas], ["Entregas", f.entregas]], num, "var(--seq-450)"))}
+        ${card("Vendas por vendedor", "quantidade no período", barras(ent(v.por_vendedor, x => x.vendas), x => x + (x === 1 ? " venda" : " vendas")))}
+      </div>`,
+    vendas: `
+      <div class="grid g4">
+        ${tile("Ticket médio", brl(v.ticket_medio), `${num(v.vendas_sem_valor)} vendas sem valor no resumo`)}
+        ${tile("Financiado", pct(v.financiado_pct), ent(v.por_forma_pagamento).map(([k, n]) => `${k} ${n}`).join(" · "))}
+        ${tile("Com troca", pct(v.com_troca_pct), `${num(v.com_troca)} vendas · ${brl(v.valor_trocas)} em trocas`)}
+        ${tile("Recebido no período", brl(v.recebido_no_periodo), `${num(v.comprovantes_no_periodo)} comprovantes lidos`)}
+      </div>
+      <div class="grid g4" style="margin-top:16px">
+        ${tile("Taxa de queda", pct(v.taxa_queda_pct), `${num(v.caidas)} vendas caíram`)}
+        ${tile("Reservas", num(v.reservas_abertas) + " abertas", `${num(v.reservas_no_periodo)} feitas no período`)}
+        ${tile("Resumo completo", pct(v.resumo_completo_pct), `${num(v.sem_resumo)} sem resumo · aviso→resumo ${num(v.tempo_aviso_ate_resumo_h)} h`)}
+        ${tile("Over · desconto · retorno", brl(v.over_total), `desconto ${brl(v.desconto_total)} · retorno ${brl(v.retorno_total)}`)}
+      </div>
+      <div class="grid g2" style="margin-top:16px">
+        ${card("Vendas por canal", "canal/portal do resumo, padronizado", barras(ent(v.por_canal), x => x + (x === 1 ? " venda" : " vendas")))}
+        ${card("Faturamento por canal", "soma do total das vendas", barras(ent(v.faturamento_por_canal).filter(x => x[1]), brl, "var(--s3)"))}
+        ${card("Por faixa de preço", "vendas com valor", barras(ent(v.por_faixa_preco), num, "var(--seq-450)"))}
+        ${card("Por dia da semana", "em que dia mais se vende", barras(ent(v.por_dia_semana), num, "var(--seq-450)"))}
+        ${card("Campos que mais faltam no resumo", "resumos com pendência", barras(ent(v.campos_mais_faltando), x => x + "×", "var(--s2)"))}
+        ${card("Por marca", "top 10", barras(ent(v.por_marca), num))}
+      </div>`,
+    leads: `
+      <div class="grid g4">
+        ${tile("Leads", num(l.recebidos), ent(l.por_tipo).map(([k, n]) => `${k} ${n}`).join(" · "))}
+        ${tile("Conversão", pct(l.conversao_pct), `${num(l.convertidos)} viraram venda`)}
+        ${tile("Retorno do vendedor", num(l.retorno_mediano_min) + " min", `mediana · ${pct(l.retorno_ate_30min_pct)} em até 30 min · ${num(l.sem_retorno)} sem retorno`)}
+        ${tile("Não vieram", num(l.nao_vieram), `${num(l.remarcados)} remarcados · ${num(l.cancelados)} cancelados`)}
+      </div>
+      <div class="grid g2" style="margin-top:16px">
+        ${card("Leads por dia", "data de chegada no grupo", colunas(l.serie_diaria, "leads"))}
+        ${card("Leads e conversão por canal", "leads (venda entre parênteses)", tabela(["Canal", "Leads", "Vendidos", "Conversão"], ent(l.por_canal).map(([k, x]) => [esc(k), x.leads, x.vendidos, pct(x.conversao_pct)])))}
+        ${card("Por SDR", "quem cadastrou o lead", barras(ent(l.por_sdr), num))}
+        ${card("Situação dos leads", "status atual", barras(ent(l.por_status), num, "var(--seq-450)"))}
+        ${card("Hora de chegada", "quando o lead entra", barras(ent(l.por_hora_chegada).map(([h, n]) => [h + "h", n]), num, "var(--seq-450)"))}
+        ${card("Cobranças de retorno", "propostas pelo agente / enviadas", barras([["Propostas", l.cobrancas_propostas], ["Enviadas", l.cobrancas_enviadas]], num, "var(--s2)"))}
+      </div>`,
+    equipe: `
+      <div class="card"><h2>Placar por vendedor</h2><p class="desc">período selecionado</p>
+      ${tabela(["Vendedor", "Vendas", "Faturamento", "Ticket", "Leads", "Conversão", "Retorno (min)", "Sem retorno", "Avaliações", "Fechou", "Entregas", "Recalls"],
+        ent(eq).sort((a, b) => b[1].vendas - a[1].vendas).map(([n, x]) => [`<b>${esc(n)}</b>`, x.vendas, brl(x.faturamento), brl(x.ticket_medio), x.leads,
+          pct(x.conversao_leads_pct), `${num(x.retorno_mediano_min)} ${x.retorno_mediano_min == null ? "" : sinal(x.retorno_mediano_min <= 60, "ok", "lento")}`,
+          x.leads_sem_retorno, x.avaliacoes, x.avaliacoes_fechadas, x.entregas, x.recalls]))}
+      </div>
+      <div class="grid g2" style="margin-top:16px">
+        ${card("Faturamento por vendedor", "", barras(ent(eq, x => x.faturamento).filter(x => x[1]).sort((a, b) => b[1] - a[1]), brl, "var(--s3)"))}
+        ${card("Retorno mediano ao lead", "minutos até a primeira resposta", barras(ent(eq, x => x.retorno_mediano_min).filter(x => x[1] != null).sort((a, b) => a[1] - b[1]), x => num(x) + " min", "var(--s2)"))}
+      </div>`,
+    estoque: `
+      <div class="grid g4">
+        ${tile("Estoque (Autocerto)", num(ac.carros), `${brl(ac.valor_total)} · preço médio ${brl(ac.preco_medio)}`)}
+        ${tile("Idade média", num(ac.idade_media_dias) + " dias", `mediana ${num(ac.idade_mediana_dias)} · ${num(ac.entraram_no_periodo)} entraram no período`)}
+        ${tile("Preparação", num(p.abertas) + " abertas", `${num(p.tarefas_criadas)} criadas · ${num(p.tarefas_concluidas)} concluídas · ${num(p.problemas_relatados)} problemas`)}
+        ${tile("Entregas no quadro", num(e.abertas), `${num(e.atrasadas)} com data vencida · ${num(e.sem_data)} sem data · ${num(e.proximos_7_dias)} nos próx. 7 dias`)}
+      </div>
+      <div class="grid g2" style="margin-top:16px">
+        ${card("Onde estão os carros", "cartões por lista do Trello agora", barras(ent(es.trello_por_lista), x => x + " carros"))}
+        ${card("Dias em cada etapa", "mediana dos carros que saíram da etapa no período (histórico do Trello)", barras(ent(es.dias_por_etapa, x => x.mediana).filter(x => x[1] != null), x => num(x) + " dias", "var(--s2)"))}
+        ${card("Idade do estoque", "dias desde o cadastro no Autocerto", barras(ent(ac.por_idade), x => x + " carros", "var(--seq-450)"))}
+        ${card("Faixa de preço do estoque", "", barras(ent(ac.por_faixa_preco), x => x + " carros", "var(--seq-450)"))}
+      </div>
+      <div class="card" style="margin-top:16px"><h2>Carros mais parados</h2><p class="desc">Autocerto</p>
+        ${tabela(["Carro", "Ano", "Placa", "Preço", "Dias"], (ac.mais_parados || []).map(x => [esc(x.carro), x.ano, x.placa, brl(x.preco), `${x.dias_no_estoque} ${sinal(x.dias_no_estoque <= 60, "ok", x.dias_no_estoque > 90 ? "crítico" : "atenção")}`]))}
+      </div>
+      <div class="grid g2" style="margin-top:16px">
+        ${card("Preparação: carros com mais pendências", "tarefas abertas por carro", barras(ent(p.carros_com_mais_pendencias), num, "var(--s2)"))}
+        ${card("Preparação por tipo", "tarefas abertas", barras(ent(p.abertas_por_tipo), num))}
+        ${card("Entregas feitas por dia", "", colunas(e.serie_diaria, "entregas"))}
+        ${card("Entregas", "situação", tabela(["Indicador", "Valor"], [["Entregues no período", num(e.entregues)], ["No prazo", pct(e.no_prazo_pct)], ["Dias da venda à entrega", num(e.dias_venda_ate_entrega)], ["Vendas sem entrega no quadro", num(e.vendidos_sem_entrega_no_quadro)], ["Pós-venda propostos / enviados", `${num(e.posvenda_propostos)} / ${num(e.posvenda_enviados)}`]]))}
+      </div>`,
+    compra: `
+      <div class="grid g4">
+        ${tile("Avaliações", num(av.avaliacoes), `${pct(av.com_valor_pct)} com valor`)}
+        ${tile("Tempo até o valor", num(av.minutos_ate_valor) + " min", `${pct(av.valor_em_ate_5min_pct)} em até 5 min`)}
+        ${tile("Valor × FIPE", pct(av.valor_medio_pct_fipe), "média do valor dado")}
+        ${tile("Viraram troca", num(av.fechou_negocio), `conversão ${pct(av.conversao_pct)}`)}
+      </div>
+      <div class="grid g2" style="margin-top:16px">
+        ${card("Avaliações por vendedor", "", barras(ent(av.por_vendedor, x => x.avaliacoes), num))}
+        ${card("Quem deu o valor", "", barras(ent(av.valor_dado_por), num, "var(--s3)"))}
+      </div>
+      <div class="grid g4" style="margin-top:16px">
+        ${tile("Recall novos", num(r.novos), `${num(r.resolvidos)} resolvidos no período`)}
+        ${tile("Recall abertos", num(r.abertos), ent(r.abertos_por_status).map(([k, n]) => `${n} ${k}`).join(" · "))}
+        ${tile("Dias para resolver", num(r.dias_para_resolver), "mediana")}
+        ${tile("Dentro da garantia", pct(r.dentro_da_garantia_pct), "até 90 dias da saída")}
+      </div>
+      <div class="grid g2" style="margin-top:16px">
+        ${card("Motivos de recall", "", barras(ent(r.motivos_mais_comuns), x => x + "×", "var(--s2)"))}
+        ${card("Recall por vendedor", "", barras(ent(r.por_vendedor), num))}
+      </div>`,
+    conversas: `
+      <div class="grid g4">
+        ${tile("Mensagens", num(c.mensagens), "todos os grupos e conversas monitorados")}
+        ${tile("Gerência", num((c.gerencia || {}).mensagens), ent((c.gerencia || {}).quem_fala).map(([k, n]) => `${k} ${n}`).join(" · "))}
+        ${tile("Meta Ads — gasto", mk.gasto != null ? brl(mk.gasto) : "—", mk.erro ? esc(mk.erro) : `${num(mk.leads_meta)} leads · CPL ${brl(mk.custo_por_lead_meta)}`)}
+        ${tile("Custo por venda (tráfego)", brl(mk.custo_por_venda), `${num(mk.vendas_trafego)} vendas · ${brl(mk.custo_por_agendamento)} por agendamento`)}
+      </div>
+      <div class="grid g2" style="margin-top:16px">
+        ${card("Mensagens por conversa", "", barras(ent(c.por_conversa).map(([k, n]) => [k.replace("Conversa privada - ", "DM ").replace(" - GRUPO SB", "").replace(" SOBERANO / BRUTUS", "").replace(": BRUTUS / SOBERANO", "").replace(" BRUTUS / SOBERANO", ""), n]), num))}
+        ${card("Quem mais fala", "todas as conversas", barras(ent(c.quem_mais_fala), num, "var(--seq-450)"))}
+        ${card("Tempo de resposta nas conversas privadas", "mediana em minutos (respostas em até 24 h)", barras(ent(c.tempo_resposta_mediano_min).filter(x => x[1] != null).map(([k, n]) => [k.replace("Conversa privada - ", ""), n]), x => num(x) + " min", "var(--s2)"))}
+        ${card("Horário das mensagens", "", barras(ent(c.por_hora).map(([h, n]) => [h + "h", n]), num, "var(--seq-450)"))}
+      </div>`,
+  };
+}
+
+/* ---------- carga ---------- */
+async function carregar() {
+  $("#main").innerHTML = `<p class="desc">Calculando as métricas…</p>`;
+  const per = $("#periodo").value;
+  const r = await fetch("/api?periodo=" + per);
+  if (!r.ok) { $("#main").innerHTML = `<p class="desc">Erro: ${esc(await r.text())}</p>`; return; }
+  const m = await r.json();
+  const fmtD = d => d.split("-").reverse().join("/");
+  $("#sub").textContent = `Brutus · Soberano — dados reais de ${fmtD(m.periodo.inicio)} a ${fmtD(m.periodo.fim)}`;
+  nCh = 0; fila.length = 0;
+  const pg = paginas(m), ativa = document.querySelector('.tab[aria-selected="true"]').dataset.p;
+  $("#main").innerHTML = Object.entries(pg).map(([k, h]) => `<section class="page ${k === ativa ? "on" : ""}" id="${k}">${h}</section>`).join("");
+  fila.forEach(fn => fn());
+}
+document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => {
+  document.querySelectorAll(".tab").forEach(o => o.setAttribute("aria-selected", o === t));
+  document.querySelectorAll(".page").forEach(p => p.classList.toggle("on", p.id === t.dataset.p));
+}));
+$("#periodo").addEventListener("change", carregar);
+$("#tema").addEventListener("click", () => {
+  const r = document.documentElement, escuro = r.dataset.theme === "dark" || (!r.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches);
+  r.dataset.theme = escuro ? "light" : "dark";
+});
+carregar();
+</script>
+</body>
+</html>
