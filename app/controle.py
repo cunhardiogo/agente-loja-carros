@@ -190,6 +190,11 @@ def _dias_no_quadro(card_id: str) -> int:
     return (datetime.now(timezone.utc) - criado).days
 
 
+def _dias_txt(card_id: str, inicio: int) -> int | str:
+    d = _dias_no_quadro(card_id)
+    return f"{d}+ (cartão do início do quadro: pode estar há mais tempo)" if d >= inicio - 1 else d
+
+
 def _quadro(c) -> tuple[list[dict], dict]:
     from .config import settings
     cards = c.get(f"/boards/{settings.trello_board}/cards", params={"fields": "name,idList,due,badges"}).json()
@@ -202,19 +207,20 @@ def consultar_trello(lista: str | None = None, carro: str | None = None) -> dict
     with trello._cliente() as c:
         cards, listas = _quadro(c)
         if carro:
-            card = trello.achar_cartao(carro, cards, listas, todas=True)
-            if not card:
-                return {"erro": f"não achei um cartão único para '{carro}'"}
+            card, err = _achar(carro, cards, listas)
+            if err:
+                return err
             chks = c.get(f"/cards/{card['id']}/checklists").json()
             return {"cartao": card["name"], "lista": listas.get(card["idList"]), "prazo": card.get("due"),
-                    "dias_no_quadro": _dias_no_quadro(card["id"]),
+                    "dias_no_quadro": _dias_txt(card["id"], max(_dias_no_quadro(cd["id"]) for cd in cards)),
                     "checklists": {k["name"]: [("✅ " if i["state"] == "complete" else "⬜ ") + i["name"]
                                                for i in k["checkItems"]] for k in chks}}
+    inicio = max((_dias_no_quadro(cd["id"]) for cd in cards), default=0)
     if lista:
         destino = _lista(lista)
         sel = [cd for cd in cards if listas.get(cd["idList"]) == destino]
         return {"lista": destino, "quantidade": len(sel), "carros": [
-            {"cartao": cd["name"], "dias_no_quadro": _dias_no_quadro(cd["id"]), "prazo": cd.get("due"),
+            {"cartao": cd["name"], "dias_no_quadro": _dias_txt(cd["id"], inicio), "prazo": cd.get("due"),
              "checklist": f"{cd['badges'].get('checkItemsChecked', 0)}/{cd['badges']['checkItems']}"
              if cd["badges"].get("checkItems") else None} for cd in sel]}
     por: dict[str, int] = {}
@@ -224,16 +230,27 @@ def consultar_trello(lista: str | None = None, carro: str | None = None) -> dict
     return {"carros_por_lista": por}
 
 
-def _um_cartao(c, carro: str) -> dict | None:
+def _achar(carro: str, cards: list[dict], listas: dict) -> tuple[dict | None, dict | None]:
+    """Carro ativo primeiro; depois o quadro todo. Ambíguo → (None, erro com as opções)."""
+    card = trello.achar_cartao(carro, cards, listas) or trello.achar_cartao(carro, cards, listas, todas=True)
+    if card:
+        return card, None
+    toks = [t for t in _ascii(carro).split() if len(t) >= 2]
+    opcoes = [f"{cd['name']} ({listas.get(cd['idList'])})" for cd in cards
+              if toks and all(t in _ascii(cd["name"]).replace("-", "") for t in toks)]
+    return None, {"erro": f"não achei um cartão único para '{carro}'", "parecidos": opcoes[:10]}
+
+
+def _um_cartao(c, carro: str) -> tuple[dict | None, dict | None]:
     cards, listas = trello.cartoes(c)
-    return trello.achar_cartao(carro, cards, listas, todas=True)
+    return _achar(carro, cards, listas)
 
 
 def renomear_cartao(carro: str, nome: str) -> dict:
     with trello._cliente() as c:
-        card = _um_cartao(c, carro)
-        if not card:
-            return {"erro": f"não achei um cartão único para '{carro}'"}
+        card, err = _um_cartao(c, carro)
+        if err:
+            return err
         c.put(f"/cards/{card['id']}", params={"name": nome}).raise_for_status()
     return {"ok": True, "antes": card["name"], "agora": nome}
 
@@ -249,9 +266,9 @@ def prazo_cartao(carro: str, data: str | None = None, horario: str | None = None
             return {"erro": "não entendi a data/horário"}
         due = _iso(datetime(d.year, d.month, d.day, int(m.group(1)), int(m.group(2) or 0), tzinfo=datas.TZ))
     with trello._cliente() as c:
-        card = _um_cartao(c, carro)
-        if not card:
-            return {"erro": f"não achei um cartão único para '{carro}'"}
+        card, err = _um_cartao(c, carro)
+        if err:
+            return err
         c.put(f"/cards/{card['id']}", params={"due": due or "null"}).raise_for_status()
     return {"ok": True, "cartao": card["name"], "prazo": due or "sem prazo"}
 
