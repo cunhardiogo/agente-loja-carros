@@ -108,6 +108,10 @@ def _tick_inner() -> None:
             trello.sincronizar()
         except Exception:
             log.exception("erro sincronizando Trello")
+        try:
+            preparacao_grupo.sincronizar_trello()  # item marcado no checklist do Trello = tarefa feita
+        except Exception:
+            log.exception("erro trazendo baixas da preparação do Trello")
     if _time.time() - _ult_planilha["t"] > 600:  # sync da planilha a cada ~10 min
         _ult_planilha["t"] = _time.time()
         try:
@@ -540,6 +544,16 @@ def api_metrics(token: str = "", authorization: str = Header(None)):
     if not _autorizado(token, authorization):
         return JSONResponse({"erro": "não autorizado"}, status_code=401)
     return _metrics()
+
+
+@app.get("/api/metricas")
+def api_metricas(periodo: str = "mes", inicio: str | None = None, fim: str | None = None, setores: str = "",
+                 token: str = "", authorization: str = Header(None)):
+    """Todas as métricas por setor num período (mes, semana, hoje, ontem, mes_passado, 30d, ano, AAAA-MM ou inicio/fim)."""
+    if not _autorizado(token, authorization):
+        return JSONResponse({"erro": "não autorizado"}, status_code=401)
+    from . import metricas
+    return metricas.em_cache(periodo, inicio, fim, [s for s in setores.split(",") if s] or None)
 
 
 @app.get("/api/meta_ads")

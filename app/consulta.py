@@ -544,7 +544,8 @@ def vendas_por_canal(periodo: str = "mes", data_inicio: str | None = None, data_
             if _dentro(r.get("data_venda"), ini, fim)]
     agg: dict = {}
     for r in rows:
-        canal = (r.get("portal_venda") or "—").strip() or "—"
+        from .metricas import canal as _canal
+        canal = _canal(r.get("portal_venda"))
         a = agg.setdefault(canal, {"canal": canal, "quantidade": 0, "valor_total": 0})
         a["quantidade"] += 1
         a["valor_total"] += r.get("valor_venda") or 0
@@ -889,7 +890,7 @@ def resumo_leads(periodo: str = "mes", data_inicio: str | None = None, data_fim:
         "periodo": [ini, fim], "total": len(rows),
         "por_tipo": dict(Counter(TIPO_LABEL.get(r["tipo"], r["tipo"]) for r in rows)),
         "por_sdr": dict(Counter(r.get("sdr") or "?" for r in rows)),
-        "por_canal": dict(Counter((r.get("canal") or "?").strip().title() for r in rows)),
+        "por_canal": dict(Counter(__import__("app.metricas", fromlist=["x"]).canal(r.get("canal")) for r in rows)),
         "por_vendedor": dict(Counter(r.get("vendedor_nome") or "?" for r in rows)),
         "por_status": dict(Counter(STATUS_LABEL.get(r["status"], r["status"]) for r in rows)),
         "vendidos": len(vendidos),
@@ -910,6 +911,7 @@ def _fmt_data_sp(iso: str) -> str:
 
 
 DISPATCH = {
+    "metricas": lambda setores=None, periodo="mes", inicio=None, fim=None: __import__("app.metricas", fromlist=["x"]).em_cache(periodo, inicio, fim, setores),
     "estoque_precos": lambda **k: __import__("app.autocerto", fromlist=["x"]).consultar(**k),
     "buscar_mensagens": lambda **k: __import__("app.arquivo", fromlist=["x"]).buscar(**k),
     "criar_venda": lambda **k: __import__("app.controle", fromlist=["x"]).criar_venda(**k),
@@ -986,6 +988,7 @@ _DI = {"type": "string", "description": "Data início ISO YYYY-MM-DD (opcional, 
 _DF = {"type": "string", "description": "Data fim ISO YYYY-MM-DD (opcional)"}
 
 TOOLS = [
+    {"type": "function", "function": {"name": "metricas", "description": "KPIs e métricas de qualquer setor num período: vendas (faturamento, ticket, canal, forma de pagamento, troca, queda, resumo), leads (conversão, comparecimento, tempo de retorno, canal, SDR), entregas (no prazo, atrasadas, dias da venda à entrega), preparacao (concluídas, paradas, por carro), estoque (idade, valor parado, dias por etapa: pintura, mecânico, foto), avaliacoes (tempo até valor, % FIPE, conversão), recall, marketing (gasto, custo por lead/venda), comunicacao (volume, gerência, tempo de resposta nas conversas), equipe (placar por vendedor), funil. Use para 'como está a conversão?', 'quanto tempo o carro fica na pintura?', 'placar dos vendedores', 'comparar com mês passado' (chame duas vezes).", "parameters": {"type": "object", "properties": {"setores": {"type": "array", "items": {"type": "string", "enum": ["vendas", "leads", "entregas", "preparacao", "estoque", "avaliacoes", "recall", "marketing", "comunicacao", "equipe"]}}, "periodo": {"type": "string", "description": "mes, semana, hoje, ontem, mes_passado, 30d, 90d, ano ou AAAA-MM"}, "inicio": {"type": "string", "description": "AAAA-MM-DD (opcional)"}, "fim": {"type": "string"}}, "required": ["setores"]}}},
     {"type": "function", "function": {"name": "estoque_precos", "description": "Estoque do Autocerto com PREÇO: carro, ano, km, cor, câmbio, placa, preço, há quantos dias está cadastrado e onde está no Trello. Use para 'quanto está o Corolla?', 'carros até 60 mil', 'estoque com preços', 'valor total do estoque', 'carro mais antigo no estoque'. Não tem custo (margem não dá).", "parameters": {"type": "object", "properties": {"termo": {"type": "string", "description": "modelo, marca, ano, cor ou placa"}, "preco_min": {"type": "number"}, "preco_max": {"type": "number"}, "ordem": {"type": "string", "enum": ["preco", "dias", "km", "ano"], "description": "dias = mais parados primeiro"}}}}},
     {"type": "function", "function": {"name": "buscar_mensagens", "description": "Busca em TODAS as mensagens dos grupos e conversas monitoradas (vendas, agendamento, entregas, preparação, fotos, avaliações, recall, gerência, marketing, tráfego, conversas com Felipe/Igor/Caio). Use para 'o que o Felipe falou do Civic', 'quem mandou o comprovante do Fastback', 'o que rolou hoje na gerência', 'procura TUL-5J38'. Sem termo traz as últimas da conversa. 'O Felipe me falou/me mandou' = conversa privada: conversa='Felipe' (Igor e Caio idem); 'o Felipe falou no grupo' = pessoa='Felipe'. Resuma o que achou e diga quem/quando/onde.", "parameters": {"type": "object", "properties": {"termo": {"type": "string", "description": "palavras a procurar (todas precisam aparecer)"}, "conversa": {"type": "string", "description": "parte do nome do grupo/conversa (ex: gerencia, vendas, felipe)"}, "pessoa": {"type": "string", "description": "quem mandou"}, "dias": {"type": "integer", "description": "padrão 30"}}}}},
     {"type": "function", "function": {"name": "criar_venda", "description": "AÇÃO: lançar uma venda ou reserva que não foi postada no grupo. Ex.: 'lança venda do Carlos: Onix 2019 placa RKC1A23, cliente João, 65 mil à vista', 'o Yan reservou o Pulse'.", "parameters": {"type": "object", "properties": {"vendedor": {"type": "string"}, "carro": {"type": "string"}, "ano": {"type": "integer"}, "placa": {"type": "string"}, "cliente": {"type": "string"}, "valor": {"type": "string"}, "data": {"type": "string", "description": "dd/mm/aaaa ou dd/mm"}, "reserva": {"type": "boolean"}, "revenda": {"type": "boolean"}, "forma_pagamento": {"type": "string"}, "canal": {"type": "string"}}, "required": ["vendedor", "carro"]}}},
@@ -1302,6 +1305,7 @@ LEMBRETES: criar_lembrete quando o dono pedir p/ ser lembrado (calcule 'quando' 
 SUPERVISOR: você é proativo. radar mostra os alertas abertos (carro encalhado, a receber parado, entrega atrasada, comparecimento baixo, sistema fora) — use quando perguntarem 'o que preciso resolver?'/'como está a operação?', e resolver_alerta p/ baixar um. anotar salva recado livre sem horário; listar_notas/resolver_nota gerenciam. pendências (listar_pendencias) mostra o que aguarda sua confirmação.
 SECRETÁRIA (assistido — você organiza, o DONO contata): lista_ligar_hoje dá quem ligar hoje (faltas de ontem, reservas paradas, entrega atrasada, a receber) com telefone — use em 'quem preciso contatar?'/'tem alguém pra ligar?'. mensagem_cobranca monta um texto pronto e educado de cobrança pra um cliente com saldo (ex 'manda uma cobrança pro João'); ENTREGUE o texto pro dono copiar/encaminhar e deixe claro que ele revisa e envia — você NUNCA manda direto pro cliente.
 LEADS (grupo Agendamento SDR — fonte oficial de visitas e negociações por telefone): use leads_abertos, buscar_lead e resumo_leads para qualquer pergunta sobre agendamentos, leads, SDRs, retorno de vendedor e cobranças. Tipos: Visita (horário na loja), Negociação telefone, Turno (horário e vendedor definidos).
+KPIs, taxas, tempos médios, placar, funil e comparação entre períodos: use SEMPRE a ferramenta metricas (é a fonte oficial dos números do painel).
 BUSCA: para qualquer coisa que não esteja nas outras ferramentas, ou para saber quem falou o quê, use buscar_mensagens. ESTOQUE = Trello (consultar_trello: onde está, checklist); PREÇO e dias de estoque = estoque_precos (Autocerto).
 LANÇAR/APAGAR: criar_venda, criar_lead, criar_entrega, registrar_pagamento, criar_avaliacao, apagar (pede ok). 'desfaz' → desfazer. Liga/desliga: automacoes/automacao. Mandar mensagem como o dono: enviar_mensagem (pede ok).
 CORREÇÕES PELO DONO: corrigir_recall, corrigir_lead, corrigir_entrega, valor_avaliacao, placa_venda, tarefa_preparacao (adicionar/concluir/remover), mover_cartao, criar_cartao, atualizar_venda, marcar_venda_caiu. Planilha e descrição do grupo se atualizam sozinhas. Quando a ferramenta devolver precisa_confirmar, diga ao dono exatamente o que vai ser feito e peça "ok" ou "não" — não diga que já fez. Se achar mais de um registro, mostre as opções e pergunte qual.

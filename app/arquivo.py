@@ -40,7 +40,9 @@ def linha(data: dict, conversa: str | None) -> dict | None:
     texto = _texto(msg) or doc.get("fileName") or None
     return {"message_id": key["id"], "jid": key.get("remoteJid"), "conversa": conversa,
             "autor": key.get("participant") or (None if key.get("fromMe") else key.get("remoteJid")),
-            "autor_nome": _autor_nome(data), "from_me": bool(key.get("fromMe")), "tipo": tipo, "texto": texto,
+            "autor_nome": (_autor_nome(data) if key.get("fromMe") or "@g.us" in (key.get("remoteJid") or "")
+                           else (conversa or "").replace("Conversa privada - ", "").split()[0] or _autor_nome(data)),
+            "from_me": bool(key.get("fromMe")), "tipo": tipo, "texto": texto,
             "citada": _stanza(data), "em": _iso(_quando(data))}
 
 

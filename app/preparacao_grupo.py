@@ -194,6 +194,36 @@ def _concluir(t: dict, em: datetime, historico: bool, c=None) -> None:
             log.exception("falha marcando item no Trello")
 
 
+def sincronizar_trello() -> dict:
+    """Quem marca o item como feito direto no checklist do Trello também conta: a tarefa vira 'feito'.
+    Item apagado do cartão (ou cartão apagado) vira 'removida'."""
+    pend = db.select_all("prep_tarefas", {"select": "id,card_id,checklist_item_id", "status": "eq.pendente",
+                                          "checklist_item_id": "not.is.null"})
+    por_card: dict[str, list] = {}
+    for t in pend:
+        por_card.setdefault(t["card_id"], []).append(t)
+    feitas = removidas = 0
+    agora = _iso(datetime.now(timezone.utc))
+    with trello._cliente() as c:
+        for card_id, ts in por_card.items():
+            r = c.get(f"/cards/{card_id}/checklists", params={"fields": "name", "checkItem_fields": "state"})
+            if r.status_code == 404:
+                itens = {}
+            elif r.is_success:
+                itens = {i["id"]: i["state"] for k in r.json() for i in k.get("checkItems", [])}
+            else:
+                continue
+            for t in ts:
+                estado = itens.get(t["checklist_item_id"])
+                if estado == "complete":
+                    db.update("prep_tarefas", {"status": "feito", "feito_em": agora}, {"id": f"eq.{t['id']}"})
+                    feitas += 1
+                elif estado is None:
+                    db.update("prep_tarefas", {"status": "removida"}, {"id": f"eq.{t['id']}"})
+                    removidas += 1
+    return {"feitas": feitas, "removidas": removidas}
+
+
 # ===== tarefa parada → recado pro Felipe (cópia pro dono) =====
 def _carro(t: dict) -> str:
     return re.sub(r"\s*-\s*[A-Za-zÀ-ú]+$", "", t.get("card_nome") or "") or t.get("carro_texto") or "geral"
