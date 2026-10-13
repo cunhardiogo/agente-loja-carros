@@ -185,7 +185,12 @@ def eh_revenda(texto: str | None) -> bool:
 
 
 def _modelo_do_aviso(texto: str) -> str | None:
-    t = _PLACA.sub(" ", texto)
+    """Só o carro: 'Factor vendida ✅ / R$5.900 em dinheiro' → 'Factor'. Valor e pagamento ficam de fora."""
+    t = next((l for l in texto.splitlines() if l.strip()), "")
+    t = re.split(r"(?i)R\$|\b\d+[.,]?\d*\s*(?:mil|k)\b|\b(?:em dinheiro|dinheiro|financiad[oa]|a vista|à vista|"
+                 r"pix|entrada|sinal|cart[aã]o|cliente)\b", t)[0]
+    t = re.sub(r"[*_~]", " ", t)
+    t = _PLACA.sub(" ", t)
     t = re.sub(r"(?i)\b(pra|para|p/)\s+(revenda|repasse)\b|\b(revenda|repasse)\b", " ", t)
     t = re.sub(r"(?i)\b(vendid[oa]s?|vendeu|venda|reservad[oa]s?)\b|[✅🚗!.]", " ", t)
     t = re.sub(r"\s+", " ", t).strip(" -–")
@@ -719,11 +724,17 @@ def texto_ranking(mes: str | None = None) -> str:
     mes = mes or datas.hoje_iso()[:7]
     nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
     rows = db.select_all("vendas", {"select": "modelo,versao,ano,placa,vendedor_id,data_venda,reservado_em,revenda,"
-                                    "created_at", "removido": "eq.false",
+                                    "created_at,autor", "removido": "eq.false",
                                     "status_venda": "in.(completa,aguardando_resumo,reservado)"})
     rows = sorted([r for r in rows if _data_ranking(r)[:7] == mes], key=lambda r: (_data_ranking(r), r.get("created_at") or ""))
     revenda = [r for r in rows if r.get("revenda")]
-    rows = [r for r in rows if not r.get("revenda")]
+    # venda postada por quem não é vendedor (ex.: gerente) fica fora do total, no fim, com o nome de quem postou
+    from .preparacao_grupo import PESSOAS
+    outros: dict[str, list] = {}
+    for r in rows:
+        if not r.get("revenda") and not r.get("vendedor_id"):
+            outros.setdefault(PESSOAS.get(r.get("autor") or "", "Sem vendedor"), []).append(r)
+    rows = [r for r in rows if not r.get("revenda") and r.get("vendedor_id")]
     # todo vendedor da equipe aparece sempre (mesmo com zero); só muda de posição
     equipe = db.select("vendedores", {"select": "nome", "ativo": "eq.true", "funcao": "eq.vendedor",
                                       "telefone": "not.is.null"})
@@ -744,6 +755,9 @@ def texto_ranking(mes: str | None = None) -> str:
     if revenda:
         linhas.append("Revenda\n")
         linhas += [_linha_carro(v) for v in revenda]
+    for nome, vs in outros.items():
+        linhas.append(f"\n*{nome}*")
+        linhas += [_linha_carro(v) for v in vs]
     from . import flags
     extra = (flags.valor("descricao_vendas_texto") or "").strip()  # recado do dono no fim da descrição
     if extra:
@@ -761,8 +775,10 @@ def atualizar_descricao(forcar: bool = False) -> bool:
         return False
     _descricao["t"] = time.time()
     novo = texto_ranking()
-    if _descricao["aplicada"] is None:
+    if _descricao["aplicada"] is None or time.time() - _descricao.get("lida", 0) > 300:
+        # relê a do grupo: edição feita à mão no WhatsApp também é corrigida
         _descricao["aplicada"] = evolution.descricao_grupo(GRUPO_VENDAS)
+        _descricao["lida"] = time.time()
     if novo.strip() == (_descricao["aplicada"] or "").strip():
         return False
     evolution.alterar_descricao_grupo(GRUPO_VENDAS, novo)
