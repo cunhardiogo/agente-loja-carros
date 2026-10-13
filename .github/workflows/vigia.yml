@@ -1,0 +1,17 @@
+# Vigia externo: se a VPS inteira cair (o vigia de lá cai junto), este job falha e o GitHub manda e-mail ao dono.
+name: Vigia do agente
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Agente responde?
+        run: |
+          for i in 1 2 3; do
+            curl -sf -m 20 https://agente.agenteintel.com.br/health | grep -q '"ok":true' && exit 0
+            sleep 60
+          done
+          echo "Agente fora do ar há ~3 minutos" && exit 1

@@ -130,6 +130,10 @@ def plano(c: httpx.Client) -> list[dict]:
         card = next((cd for cd in cards if cd["id"] == v.get("trello_card_id")), None) or por_placa.get(
             (v.get("placa") or "").replace("-", "").upper()) or _por_modelo(v, cards, listas,
                                                                            nomes.get(v.get("vendedor_id")))
+        if not card and not v.get("placa"):  # sem placa não dá pra saber qual carro: pergunta, não inventa cartão
+            if v["status_venda"] != "desistiu" and not v.get("cartao_aviso_em"):
+                acoes.append({"venda": v, "acao": "perguntar", "para": None})
+            continue
         if not card:
             if v["status_venda"] != "desistiu" and por_nome.get(VENDIDOS):
                 destino = FINALIZADO if v.get("status_entrega") == "entregue" else VENDIDOS
@@ -176,6 +180,9 @@ def sincronizar(aplicar: bool = True) -> list[dict]:
         acoes = plano(c)
         if aplicar:
             for a in acoes:
+                if a.get("acao") == "perguntar":
+                    _perguntar_cartao(a["venda"], {x["id"]: x["nome"] for x in db.select("vendedores", {"select": "id,nome"})})
+                    continue
                 if a.get("acao") == "criar":
                     card = c.post("/cards", params=a["criar"]).json()
                     db.update("vendas", {"trello_card_id": card["id"]}, {"id": f"eq.{a['venda']['id']}"})
@@ -192,6 +199,20 @@ def sincronizar(aplicar: bool = True) -> list[dict]:
                     db.update("vendas", {"trello_card_id": a["card"]["id"]}, {"id": f"eq.{a['venda']['id']}"})
             sincronizar_checklists(c)
     return acoes
+
+
+def _perguntar_cartao(v: dict, nomes: dict) -> None:
+    from . import evolution
+    from .config import settings
+    carro = " ".join(str(x) for x in (v.get("modelo"), v.get("versao"), v.get("ano")) if x) or "carro"
+    try:
+        evolution.enviar_texto(settings.meu_numero,
+                               f"🚗 Não achei no Trello o carro da venda *{carro}* ({nomes.get(v.get('vendedor_id'), 'sem vendedor')}). "
+                               f"Me manda a placa (ex.: 'a placa da {carro} é ABC-1D23') que eu ligo ao cartão certo.")
+    except Exception:
+        log.exception("falha perguntando o cartão da venda")
+        return
+    db.update("vendas", {"cartao_aviso_em": datas.agora().isoformat()}, {"id": f"eq.{v['id']}"})
 
 
 def itens_preparacao(obs: str | None) -> list[str]:

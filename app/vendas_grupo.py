@@ -344,6 +344,8 @@ def _aviso(tipo, texto, mid, autor, em, historico) -> dict:
     if criado is None:
         return {"ignored": "aviso_duplicado"}
     _vincular_recentes(criado["id"], autor, em)
+    if not historico:
+        amarrar(criado)
     sujo["v"] = True
     return {"venda": criado.get("id"), "status": novo_status}
 
@@ -382,9 +384,41 @@ def _resumo(texto, mid, autor, em, historico, venda_id: str | None = None) -> di
             return {"ignored": "resumo_duplicado"}
     _vincular_recentes(venda["id"], autor, em)
     recalcular(venda["id"])  # o total do resumo muda a situação do pagamento
+    venda = amarrar(venda)
     _ligar_lead(venda)
     sujo["v"] = True
     return {"resumo": venda["id"], "pendencias": len(campos["pendencias"])}
+
+
+def amarrar(venda: dict) -> dict:
+    """Liga a venda ao carro certo assim que ela entra: cartão do Trello (fora do FINALIZADO) ou estoque do Autocerto.
+    Só grava quando acha UM carro; senão deixa sem placa (o Trello pergunta ao dono em vez de criar cartão)."""
+    if venda.get("placa") or venda.get("revenda"):
+        return venda
+    texto = " ".join(str(x) for x in (venda.get("modelo"), venda.get("versao"), venda.get("ano")) if x)
+    if not texto:
+        return venda
+    upd: dict = {}
+    try:
+        from . import trello
+        if trello.configurado():
+            with trello._cliente() as c:
+                cards, listas = trello.cartoes(c)
+            card = trello.achar_cartao(texto, cards, listas)
+            if card and trello._placa(card["name"]):
+                upd = {"placa": trello._placa(card["name"]), "trello_card_id": card["id"]}
+        if not upd:
+            from . import autocerto
+            if autocerto.configurado():
+                achados = autocerto.consultar(texto)["carros"]
+                if len(achados) == 1 and achados[0].get("placa"):
+                    upd = {"placa": placa_norm(achados[0]["placa"])}
+    except Exception:
+        log.exception("falha amarrando a venda ao carro")
+    if upd:
+        db.update("vendas", upd, {"id": f"eq.{venda['id']}"})
+        venda = {**venda, **upd}
+    return venda
 
 
 def _ligar_lead(venda: dict) -> None:
