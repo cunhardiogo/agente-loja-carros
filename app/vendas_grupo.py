@@ -145,7 +145,7 @@ def campos_venda(c: dict, ref) -> dict:
     return {
         "modelo": modelo, "versao": (c.get("versao") or "").strip() or None,
         "ano": int(ano.group()) if ano else None, "cor": (c.get("cor") or "").strip() or None,
-        "km": int(km) if km else None, "placa": placa_norm(c.get("placa")) or (c.get("placa") or "").strip() or None,
+        "km": int(km) if km else None, "placa": placa_norm(re.sub(r"\s", "", c.get("placa") or "")) or (c.get("placa") or "").strip() or None,
         "em_estoque": True if _marcado(c.get("estoque"), "sim") else (False if _marcado(c.get("estoque"), "nao") else None),
         "tabela_preco": _valor(c.get("tabela")), "valor_venda": _valor(c.get("valor_vendido")),
         "desconto": _valor(c.get("desconto")), "over_valor": (c.get("over") or "").strip() or None,
@@ -618,7 +618,20 @@ def prazo_resumo(aviso_em: datetime) -> datetime:
 
 
 def _carro(v: dict) -> str:
-    return " ".join(x for x in (v.get("modelo"), v.get("versao"), v.get("placa")) if x) or "carro sem identificação"
+    """'BYD / BYD DOLPHIN / SRJ1G18' → 'BYD DOLPHIN 2024 (SRJ-1G18)'. Marca e versão sem repetir."""
+    modelo, versao = (v.get("modelo") or "").strip(), (v.get("versao") or "").strip()
+    if _ascii(modelo) in _MARCAS or (modelo and _ascii(modelo) in _ascii(versao)):
+        nome = versao or modelo
+    elif versao and _ascii(versao) not in _ascii(modelo):
+        nome = f"{modelo} {versao}"
+    else:
+        nome = modelo or versao
+    if v.get("ano") and str(v["ano"]) not in nome:
+        nome = f"{nome} {v['ano']}"
+    p = (v.get("placa") or "").replace("-", "").replace(" ", "").upper()
+    if len(p) == 7:
+        nome = f"{nome} ({p[:3]}-{p[3:]})"
+    return nome.strip() or "carro sem identificação"
 
 
 def _nome_vendedor(v: dict) -> str:
@@ -632,15 +645,17 @@ def texto_cobranca(v: dict, motivo: str) -> str:
     nome = _nome_vendedor(v)
     carro = _carro(v)
     if motivo == "resumo":
-        return (f"Fala {nome}! A venda do {carro} foi avisada no grupo às "
-                f"{_hhmm(_dt(v['aviso_em']))} e o Resumo de Venda ainda não chegou. Manda lá no grupo de vendas 🙏")
+        d = _dt(v["aviso_em"]).astimezone(datas.TZ)
+        return (f"Fala {nome}! A venda do {carro} foi avisada no grupo em {d:%d/%m} às {d:%H:%M} "
+                f"e o Resumo de Venda ainda não chegou. Manda lá no grupo de vendas 🙏")
     if motivo == "pendencias":
         return (f"Fala {nome}! No Resumo de Venda do {carro} ficou faltando: {', '.join(v.get('pendencias') or [])}. "
                 f"Consegue completar lá no grupo (pode editar a mensagem)? 🙏")
     if motivo == "sem_entrega":
         return (f"Fala {nome}! A venda do {carro} ainda não está no quadro do grupo de entregas. "
                 f"Coloca lá com o dia e o horário combinados com o cliente 🙏")
-    return (f"Fala {nome}! O {carro} está reservado desde {_hhmm(_dt(v['reservado_em']))}. "
+    r = _dt(v["reservado_em"]).astimezone(datas.TZ)
+    return (f"Fala {nome}! O {carro} está reservado desde {r:%d/%m} às {r:%H:%M}. "
             f"Fechou a venda ou o cliente desistiu? Me dá um retorno 🙏")
 
 

@@ -807,10 +807,15 @@ def _planejamento_semana_texto() -> str:
     ags = db.select_all("leads", {"select": "data_agendada", "removido": "eq.false",
                                   "and": f"(data_agendada.gte.{ini.isoformat()},data_agendada.lte.{fim.isoformat()})"})
     entregas = consulta.entregas_agendadas("semana")["entregas"]
-    estoque = consulta.listar_carros("a_anunciar")
-    vlist = consulta.lista_vendas("tudo")
-    res = consulta.reservados("mes")
-    receber = consulta.pendencias("pagamento")
+    abertas = db.select_all("entregas", {"select": "data_entrega", "origem": "in.(grupo,planilha)",
+                                         "status": "eq.agendada", "removido": "eq.false"})
+    reservas = db.select_all("vendas", {"select": "id", "status_venda": "eq.reservado", "removido": "eq.false"})
+    receber = consulta.a_receber_vendas("tudo")
+    try:
+        from . import autocerto
+        parados = [i for i in autocerto.estoque() if (i.get("dias_no_estoque") or 0) > 90]
+    except Exception:
+        parados = []
 
     from collections import Counter
     abrev = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
@@ -823,16 +828,19 @@ def _planejamento_semana_texto() -> str:
         L.append(f"🚗 {len(entregas)} entregas: " + ", ".join(
             f"{(e.get('veiculo') or '')[:18]} ({_dm(e.get('data_entrega'))})" for e in entregas[:8]))
     tarefas = []
-    if estoque["quantidade"]:
-        tarefas.append(f"anunciar {estoque['quantidade']} carro(s)")
-    if vlist["a_entregar"]:
-        tarefas.append(f"entregar {vlist['a_entregar']} carro(s)")
-    if res["quantidade"]:
-        tarefas.append(f"resolver {res['quantidade']} reservado(s)")
-    if receber["valor_total_a_receber"]:
-        tarefas.append(f"receber {_brl(receber['valor_total_a_receber'])}")
+    if abertas:
+        sem_data = sum(1 for e in abertas if not e.get("data_entrega"))
+        tarefas.append(f"entregar {len(abertas)} carro(s) do quadro" + (f" ({sem_data} sem data)" if sem_data else ""))
+    if reservas:
+        tarefas.append(f"resolver {len(reservas)} reserva(s)")
+    if receber.get("total_a_receber"):
+        tarefas.append(f"receber {_brl(receber['total_a_receber'])} (banco {_brl(receber['financiamento_banco'])} · "
+                       f"à vista {_brl(receber['a_vista'])})")
+    if parados:
+        tarefas.append(f"girar {len(parados)} carro(s) parados há +90 dias "
+                       f"({_brl(sum(i.get('preco') or 0 for i in parados))})")
     if tarefas:
-        L.append("🎯 *Pra fazer:* " + " · ".join(tarefas))
+        L.append("🎯 *Pra fazer:*\n" + "\n".join(f"• {t}" for t in tarefas))
     return "\n".join(L)
 
 
