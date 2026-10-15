@@ -54,6 +54,7 @@ _lojasb_ok = {"v": True}
 _tick_lock = threading.Lock()
 
 # envios automáticos pausados enquanto os processos de cada grupo são remontados
+GRUPO_GERENCIA = "120363408838873964@g.us"
 RELATORIOS_ATIVOS = {"planejamento", "agenda", "vespera_entregas", "preparacao_grupo", "recall_grupo", "agendados_dia_seguinte"}  # fechamento e semanal pausados
 RADAR_ATIVO = False       # alertas do supervisor e aviso de queda do número do agente
 LEMBRETES_ATIVOS = False
@@ -319,10 +320,8 @@ def _checar_relatorios() -> None:
                 evolution.enviar_por_coletor(preparacao_grupo.GRUPO, texto)
             elif tipo == "recall_grupo":
                 evolution.enviar_por_coletor(recall_grupo.GRUPO, texto)
-            elif tipo == "agendados_dia_seguinte":  # dono e Felipe
-                evolution.enviar_texto(settings.meu_numero, texto)
-                for numero in flags.operacionais():
-                    evolution.enviar_texto(numero, texto)
+            elif tipo == "agendados_dia_seguinte":  # grupo da Gerência, pelo número do dono
+                evolution.enviar_por_coletor(GRUPO_GERENCIA, texto)
             elif tipo in _SO_DONO:
                 evolution.enviar_texto(settings.meu_numero, texto)
             else:
