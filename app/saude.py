@@ -34,7 +34,7 @@ def mensagens_desde(c: httpx.Client, jid: str, desde_ts: float) -> list[dict]:
         page += 1
 
 
-def repescar(rotear, horas: float = REPESCA_HORAS) -> int:
+def repescar(rotear, horas: float = REPESCA_HORAS, forcar: bool = False) -> int:
     """Passa pelo roteamento normal toda mensagem das últimas horas que ainda não está no arquivo.
     Os tratamentos são idempotentes (trava por message_id), então repassar é seguro."""
     desde = datas.agora() - timedelta(hours=horas)
@@ -48,7 +48,7 @@ def repescar(rotear, horas: float = REPESCA_HORAS) -> int:
                 log.exception("repescagem: falha lendo %s", g["nome"])
                 continue
             for m in ms:
-                if m["key"]["id"] in vistas:
+                if m["key"]["id"] in vistas and not forcar:
                     continue
                 try:
                     rotear({"instance": settings.evolution_instance, "event": "messages.upsert", "data": m})

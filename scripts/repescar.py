@@ -6,4 +6,5 @@ from app import saude
 from app.main import _rotear_evento
 
 if __name__ == "__main__":
-    print(saude.repescar(_rotear_evento, horas=float(sys.argv[1]) if len(sys.argv) > 1 else 2), "mensagens recuperadas")
+    print(saude.repescar(_rotear_evento, horas=float(sys.argv[1]) if len(sys.argv) > 1 else 2,
+                         forcar="--forcar" in sys.argv), "mensagens recuperadas")

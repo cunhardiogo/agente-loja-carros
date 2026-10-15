@@ -147,6 +147,8 @@ def processar(data: dict, historico: bool = False) -> dict:
         alvo = r[0] if r and _dt(r[0]["avaliado_em"]) <= em else None
     if not alvo:
         return {"ignored": "valor_sem_avaliacao"}
+    if alvo.get("valor_texto") and texto.strip() in alvo["valor_texto"]:
+        return {"ignored": "valor_repetido"}  # mesma mensagem reprocessada (repescagem)
     literal = texto.strip() if not alvo.get("valor_texto") else f"{alvo['valor_texto']}\n{texto.strip()}"
     upd = {"valor_texto": literal, "valor_por": gestor, "valor_em": _iso(em)}
     if not alvo.get("valor_avaliacao"):
