@@ -68,6 +68,7 @@ def processar(data: dict, instancia: str, apikey: str, aplicar: bool = True) -> 
         r = classificar(texto, autor_caio, imagem)
     except Exception:
         log.exception("falha classificando mensagem de fotos")
+        db.delete("prep_msgs", {"message_id": f"eq.fotos:{key.get('id')}"})  # repescagem tenta de novo
         return {"erro": "classificacao"}
     acao, carros = r.get("acao"), [c for c in (r.get("carros") or []) if c]
     if acao not in ("pronto_para_foto", "fotos_feitas") or not carros:

@@ -130,6 +130,7 @@ def processar(data: dict, historico: bool = False) -> dict:
         it = extrair(texto, _rotulo(citado) + " — " + (citado.get("motivo") or "") if citado else None, abertos)
     except Exception:
         log.exception("falha extraindo recall")
+        db.delete("recall_msgs", {"message_id": f"eq.{mid}"})  # repescagem tenta de novo
         return {"erro": "extracao"}
     tipo = it.get("tipo") or "info"
     alvo = citado

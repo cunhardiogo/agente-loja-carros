@@ -7,7 +7,7 @@ from datetime import timedelta
 from fastapi import BackgroundTasks, FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from . import (acoes, arquivo, avaliacoes_grupo, flags, recall_grupo, cobrancas, confirmacao, consulta, entregas_grupo, fotos_grupo, preparacao_grupo, trello, datas, db, evolution, ingest, leads, media, meta_ads, planilha, sheets,
+from . import (acoes, arquivo, avaliacoes_grupo, flags, saude, recall_grupo, cobrancas, confirmacao, consulta, entregas_grupo, fotos_grupo, preparacao_grupo, trello, datas, db, evolution, ingest, leads, media, meta_ads, planilha, sheets,
                supervisor, vendas_grupo)
 from .config import settings
 
@@ -49,6 +49,7 @@ _ult_lembrete = {"t": 0.0}
 _ult_planilha = {"t": 0.0}
 _ult_controle = {"t": 0.0}
 _ult_trello = {"t": 0.0}
+_ult_saude = {"conexao": 0.0, "repesca": 0.0, "ia": 0.0}
 _lojasb_ok = {"v": True}
 _tick_lock = threading.Lock()
 
@@ -102,6 +103,15 @@ def _tick_inner() -> None:
         except Exception:
             leads.sujo["v"] = vendas_grupo.sujo["v"] = entregas_grupo.sujo["v"] = True
             log.exception("erro escrevendo planilha de controle")
+    agora_t = _time.time()
+    for chave, intervalo, fn in (("conexao", 300, saude.checar_conexao), ("ia", 1800, saude.checar_ia),
+                                 ("repesca", 600, lambda: saude.repescar(_rotear_evento))):
+        if agora_t - _ult_saude[chave] > intervalo:
+            _ult_saude[chave] = agora_t
+            try:
+                fn()
+            except Exception:
+                log.exception("erro na checagem de saúde %s", chave)
     if _time.time() - _ult_trello["t"] > 180:  # quadro ESTOQUE do Trello a cada ~3 min
         _ult_trello["t"] = _time.time()
         try:

@@ -54,6 +54,27 @@ def extrair(texto: str, imagem_b64: str | None = None, mime: str | None = None) 
     return json.loads(resp.choices[0].message.content or "{}").get("itens") or []
 
 
+FOTO_MIN = 10
+
+
+def identificar_carro(imagem_b64: str, mime: str | None = None) -> str | None:
+    """Placa (e modelo, se der) que aparece na foto. None se não der pra ler."""
+    resp = llm._client.chat.completions.create(
+        model=settings.openai_model_extracao, temperature=0, response_format={"type": "json_object"},
+        messages=[{"role": "system", "content": "Identifique o carro da foto. Responda SOMENTE JSON "
+                   '{"placa": "ABC1D23" ou null, "carro": "marca e modelo" ou null}. Leia a placa com cuidado.'},
+                  {"role": "user", "content": [{"type": "image_url", "image_url": {
+                      "url": f"data:{mime or 'image/jpeg'};base64,{imagem_b64}"}}]}])
+    r = json.loads(resp.choices[0].message.content or "{}")
+    return " ".join(x for x in (r.get("carro"), r.get("placa")) if x) or None
+
+
+def _carro_da_foto(autor: str, em: datetime) -> str | None:
+    r = db.select("prep_msgs", {"select": "carro,em", "autor": f"eq.{autor}", "carro": "not.is.null",
+                                "em": f"gte.{_iso(em - timedelta(minutes=FOTO_MIN))}", "order": "em.desc", "limit": "1"})
+    return r[0]["carro"] if r and _dt(r[0]["em"]) <= em else None
+
+
 def _parecida(a: str, b: str) -> bool:
     return SequenceMatcher(None, _ascii(a), _ascii(b)).ratio() >= 0.72
 
@@ -87,6 +108,17 @@ def processar(data: dict, instancia: str, apikey: str, historico: bool = False) 
     if db.insert_lock("prep_msgs", {"message_id": mid}) is None:
         return {"ignored": "duplicada"}
     em = _quando(data)
+    autor = _pessoa(key.get("participant"), data)
+    if img and not texto:  # foto sem texto: lê placa/carro da imagem; a próxima mensagem da pessoa fala desse carro
+        try:
+            carro = identificar_carro(*img)
+        except Exception:
+            log.exception("falha lendo a placa da foto")
+            db.delete("prep_msgs", {"message_id": f"eq.{mid}"})  # libera pra repescagem tentar de novo
+            return {"erro": "foto"}
+        if carro:
+            db.update("prep_msgs", {"carro": carro, "autor": autor, "em": _iso(em)}, {"message_id": f"eq.{mid}"})
+        return {"foto": carro}
     # resposta curta citando um pedido ("feito", "ok", "✓") fecha a tarefa daquele pedido
     stanza = _stanza(data)
     if stanza and re.fullmatch(r"\W*(ok|feito|pronto|resolvido|ja fiz|fiz|✓|✅|👍)\W*", _ascii(texto) or "ok"):
@@ -99,15 +131,35 @@ def processar(data: dict, instancia: str, apikey: str, historico: bool = False) 
         itens = extrair(texto, *(img or (None, None)))
     except Exception:
         log.exception("falha extraindo preparação")
+        db.delete("prep_msgs", {"message_id": f"eq.{mid}"})  # libera pra repescagem tentar de novo
         return {"erro": "extracao"}
-    autor = _pessoa(key.get("participant"), data)
     responsavel = _mencionado(data)
     resumo = {"tarefas": 0, "feitas": 0, "problemas": 0}
+    if any(not it.get("carro") for it in itens):  # "Volante desalinhado" depois da foto da placa: mesmo carro
+        da_foto = _carro_da_foto(autor, em)
+        if da_foto:
+            itens = [it if it.get("carro") else {**it, "carro": da_foto} for it in itens]
+    anterior = None
+    if any(not it.get("carro") for it in itens):  # "Volante desalinhado" logo depois do "Yaris STO-2D26": mesmo carro
+        anterior = _carro_recente(em)
     with trello._cliente() as c:
         cards, listas = trello.cartoes(c) if trello.configurado() else ([], {})
         for it in itens:
+            if not it.get("carro") and anterior:
+                it = {**it, "carro": anterior}
             _aplicar(it, mid, em, autor, responsavel, historico, c, cards, listas, resumo)
     return resumo
+
+
+CONTINUACAO_MIN = 10
+
+
+def _carro_recente(em: datetime) -> str | None:
+    """Carro da última mensagem do grupo que citou um carro nos 10 min anteriores."""
+    r = db.select("prep_tarefas", {"select": "carro_texto,criado_em", "carro_texto": "not.is.null",
+                                   "criado_em": f"gte.{_iso(em - timedelta(minutes=CONTINUACAO_MIN))}",
+                                   "order": "criado_em.desc", "limit": "1"})
+    return r[0]["carro_texto"] if r and _dt(r[0]["criado_em"]) <= em else None
 
 
 def _aplicar(it, mid, em, autor, responsavel, historico, c, cards, listas, resumo) -> tuple | None:
