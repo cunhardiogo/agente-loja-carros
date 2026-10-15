@@ -16,6 +16,9 @@ AUTOMACOES = {
     "relatorio_agenda": (True, "agenda da manhã"),
     "relatorio_planejamento": (True, "planejamento"),
     "relatorio_vespera_entregas": (True, "lembrete de véspera das entregas (vendedores e você)"),
+    "relatorio_preparacao_grupo": (True, "resumo das pendências de preparação no grupo, 8h"),
+    "relatorio_recall_grupo": (True, "resumo dos recalls abertos no grupo de recall, 8h"),
+    "relatorio_agendados_dia_seguinte": (True, "resumo dos agendados do dia seguinte pra você e o Felipe, 18h"),
 }
 _cache: dict = {"t": 0.0, "rows": {}}
 

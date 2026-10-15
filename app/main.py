@@ -54,7 +54,7 @@ _lojasb_ok = {"v": True}
 _tick_lock = threading.Lock()
 
 # envios automáticos pausados enquanto os processos de cada grupo são remontados
-RELATORIOS_ATIVOS = {"planejamento", "agenda", "vespera_entregas"}  # fechamento e semanal pausados
+RELATORIOS_ATIVOS = {"planejamento", "agenda", "vespera_entregas", "preparacao_grupo", "recall_grupo", "agendados_dia_seguinte"}  # fechamento e semanal pausados
 RADAR_ATIVO = False       # alertas do supervisor e aviso de queda do número do agente
 LEMBRETES_ATIVOS = False
 
@@ -266,6 +266,9 @@ def _jobs_relatorio(dow: int, hhmm: str) -> list:
         ("planejamento", _planejamento_semana_texto, {0}, "08:00", "11:59"),
         ("vespera_entregas", entregas_grupo.vespera_texto, {0, 1, 2, 3, 4, 5, 6}, "17:00", "20:59"),
         ("agenda", _agenda_manha_texto, {0, 1, 2, 3, 4, 5}, "09:00", "11:59"),
+        ("preparacao_grupo", preparacao_grupo.resumo_grupo, {0, 1, 2, 3, 4, 5, 6}, "08:00", "10:59"),
+        ("recall_grupo", recall_grupo.resumo_grupo, {0, 1, 2, 3, 4, 5, 6}, "08:00", "10:59"),
+        ("agendados_dia_seguinte", leads.agenda_amanha_texto, {0, 1, 2, 3, 4, 5, 6}, "18:00", "20:59"),
         ("fechamento", _resumo_diario_texto, {0, 1, 2, 3, 4}, "18:00", "21:59"),
         ("fechamento", _resumo_diario_texto, {5}, "15:00", "21:59"),
         ("semanal", _resumo_semanal_texto, {6}, "18:00", "21:59"),
@@ -312,7 +315,15 @@ def _checar_relatorios() -> None:
                         texto += f"\n\n🧠 *Leitura da semana:*\n{ins}"
             except Exception:
                 log.exception("erro anexando insight")
-            if tipo in _SO_DONO:
+            if tipo == "preparacao_grupo":  # postado no grupo, pelo número do dono
+                evolution.enviar_por_coletor(preparacao_grupo.GRUPO, texto)
+            elif tipo == "recall_grupo":
+                evolution.enviar_por_coletor(recall_grupo.GRUPO, texto)
+            elif tipo == "agendados_dia_seguinte":  # dono e Felipe
+                evolution.enviar_texto(settings.meu_numero, texto)
+                for numero in flags.operacionais():
+                    evolution.enviar_texto(numero, texto)
+            elif tipo in _SO_DONO:
                 evolution.enviar_texto(settings.meu_numero, texto)
             else:
                 evolution.enviar_relatorio(texto)

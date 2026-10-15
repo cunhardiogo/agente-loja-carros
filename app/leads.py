@@ -399,6 +399,16 @@ def _ordem_horario(h: str | None) -> int:
     return 24 * 60
 
 
+def agenda_amanha_texto() -> str:
+    """Resumo das 18h: leads agendados pro dia seguinte (dono e Felipe). Vazio = não manda."""
+    from datetime import timedelta
+    amanha = datas.hoje() + timedelta(days=1)
+    texto = agenda_do_dia_texto(amanha.isoformat())
+    if texto.endswith("nenhum"):
+        return ""
+    return texto.replace("pra hoje", f"pra amanhã ({amanha:%d/%m})", 1)
+
+
 def agenda_do_dia_texto(dia: str | None = None) -> str:
     """Leads com data agendada pro dia (já com as edições da planilha), um resumo por lead."""
     dia = dia or datas.hoje_iso()

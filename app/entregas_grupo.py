@@ -138,6 +138,8 @@ def _reabrir(item: dict, vend_id: str | None, em: datetime) -> dict | None:
 def processar(data: dict, historico: bool = False) -> dict:
     from .vendas_grupo import vendedor_por_nome
     texto = _texto(data.get("message") or {})
+    if texto and not eh_lista(texto) and not historico:
+        return _pronto_no_grupo(texto)
     if not texto or not eh_lista(texto):
         return {"ignored": "nao_e_lista"}
     em = _quando(data)
@@ -196,9 +198,55 @@ def _ligar_venda(entrega: dict, item: dict, vend_id: str | None) -> None:
         vendas_grupo.sujo["v"] = True
 
 
+def marcar_pronto(card_id: str, c=None) -> int:
+    """Carro pronto pra entregar (ou entregue): todos os itens dos checklists do cartão ficam ok,
+    e as tarefas de preparação desse carro viram feitas."""
+    from . import trello
+    if not trello.configurado():
+        return 0
+    n = 0
+
+    def _marcar(cli):
+        nonlocal n
+        for chk in cli.get(f"/cards/{card_id}/checklists").json():
+            for item in chk.get("checkItems", []):
+                if item["state"] != "complete":
+                    trello.concluir_item(cli, card_id, item["id"])
+                    n += 1
+    if c is None:
+        with trello._cliente() as cli:
+            _marcar(cli)
+    else:
+        _marcar(c)
+    db.update("prep_tarefas", {"status": "feito", "feito_em": _iso(datetime.now(timezone.utc))},
+              {"card_id": f"eq.{card_id}", "status": "eq.pendente"})
+    return n
+
+
+def _pronto_no_grupo(texto: str) -> dict:
+    """'Kwid pronto pra entrega', 'Fit ok' (no grupo de entregas): marca os checklists do cartão do carro."""
+    from . import trello
+    if not re.search(r"(?i)\bpront[oa]\b|\bok\b|liberad[oa]", texto) or not trello.configurado():
+        return {"ignored": "conversa"}
+    with trello._cliente() as c:
+        cards, listas = trello.cartoes(c)
+        vendidos = [cd for cd in cards if listas.get(cd["idList"]) == trello.VENDIDOS]
+        card = trello.achar_cartao(texto, vendidos, listas)
+        if not card:
+            return {"ignored": "carro_nao_achado"}
+        return {"pronto": card["name"], "itens": marcar_pronto(card["id"], c)}
+
+
 def dar_baixa(entrega: dict, em: datetime) -> None:
-    """Carro saiu do quadro = entregue."""
+    """Carro saiu do quadro = entregue (checklists do cartão ficam ok)."""
     db.update("entregas", {"status": "entregue", "entregue_em": _iso(em)}, {"id": f"eq.{entrega['id']}"})
+    try:
+        venda = db.select("vendas", {"select": "trello_card_id", "id": f"eq.{entrega.get('venda_id')}"}) \
+            if entrega.get("venda_id") else []
+        if venda and venda[0].get("trello_card_id"):
+            marcar_pronto(venda[0]["trello_card_id"])
+    except Exception:
+        log.exception("falha marcando checklist da entrega")
     if entrega.get("venda_id"):
         db.update("vendas", {"status_entrega": "entregue",
                              "data_entrega_real": em.astimezone(datas.TZ).date().isoformat()},

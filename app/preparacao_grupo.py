@@ -21,7 +21,7 @@ PESSOAS = {"183863389221110@lid": "Daniel", "217982575837352@lid": "Caio", "2484
 
 PROMPT = """Você lê mensagens do grupo de PREPARAÇÃO de carros de uma loja (deixar o carro pronto pra venda/entrega).
 Responda SOMENTE um JSON {"itens": [...]}, cada item:
-- "acao": "tarefa" (algo a fazer num carro ou pra loja), "feito" (avisa que algo foi feito), "problema" (defeito encontrado no carro: freio, embreagem, não liga, barulho...), "compra" (peça/item a comprar ou buscar), ou "info" (resto: conversa, combinação)
+- "acao": "tarefa" (algo a fazer num carro ou pra loja), "feito" (avisa que algo foi feito — "volante ok", "Kwid lavado"; "tudo ok no Kwid" = descricao "tudo"), "pronto_entrega" (o carro está pronto pra entregar ao cliente), "problema" (defeito encontrado no carro: freio, embreagem, não liga, barulho...), "compra" (peça/item a comprar ou buscar), ou "info" (resto: conversa, combinação)
 - "carro": o carro como foi escrito (ex "Civic 2014", "208 azul", "Versa branco"), ou null
 - "descricao": curta, no infinitivo pra tarefa/compra ("Trocar pneu", "Levar para pintura", "Frisar os 4 pneus"); o defeito pra problema; o que foi feito pra feito
 - "tipo": "pintura", "mecanica", "estetica" (lavagem, polimento, higienização), "peca_compra", "foto", "buscar_levar" ou "outro"
@@ -139,35 +139,57 @@ def processar(data: dict, instancia: str, apikey: str, historico: bool = False) 
         da_foto = _carro_da_foto(autor, em)
         if da_foto:
             itens = [it if it.get("carro") else {**it, "carro": da_foto} for it in itens]
-    anterior = None
-    if any(not it.get("carro") for it in itens):  # "Volante desalinhado" logo depois do "Yaris STO-2D26": mesmo carro
-        anterior = _carro_recente(em)
     with trello._cliente() as c:
         cards, listas = trello.cartoes(c) if trello.configurado() else ([], {})
-        for it in itens:
-            if not it.get("carro") and anterior:
-                it = {**it, "carro": anterior}
-            _aplicar(it, mid, em, autor, responsavel, historico, c, cards, listas, resumo)
+        eh_lista = "miss" in _ascii(texto.splitlines()[0] if texto else "")
+        vigentes = [r for it in itens
+                    if (r := _aplicar(it, mid, em, autor, responsavel, historico, c, cards, listas, resumo, eh_lista))]
+        if eh_lista and not historico:
+            resumo["feitas"] += _baixa_por_lista(vigentes, em, c)
     return resumo
 
 
-CONTINUACAO_MIN = 10
+def _baixa_por_lista(vigentes: list[tuple], em: datetime, c) -> int:
+    """Nova lista de Missões: item de lista anterior DO MESMO CARRO que não aparece mais = feito.
+    Carro que não está na lista nova não é mexido."""
+    cards = {card for card, _ in vigentes if card}
+    n = 0
+    for card in cards:
+        atuais = [d for cd, d in vigentes if cd == card]
+        for t in db.select_all("prep_tarefas", {"select": "*", "card_id": f"eq.{card}", "status": "eq.pendente",
+                                                 "lista": "eq.true", "criado_em": f"lt.{_iso(em)}"}):
+            if not any(_parecida(t["descricao"].lstrip("⚠️ "), d.lstrip("⚠️ ")) for d in atuais):
+                _concluir(t, em, False, c)
+                n += 1
+    return n
 
 
-def _carro_recente(em: datetime) -> str | None:
-    """Carro da última mensagem do grupo que citou um carro nos 10 min anteriores."""
-    r = db.select("prep_tarefas", {"select": "carro_texto,criado_em", "carro_texto": "not.is.null",
-                                   "criado_em": f"gte.{_iso(em - timedelta(minutes=CONTINUACAO_MIN))}",
-                                   "order": "criado_em.desc", "limit": "1"})
-    return r[0]["carro_texto"] if r and _dt(r[0]["criado_em"]) <= em else None
+
+def _feita_por_palavra(it: dict, card_id: str | None) -> list[dict]:
+    """'Idea: volante ok' → a tarefa '⚠️ Volante desalinhado' do mesmo carro. 'tudo ok' → todas as do carro."""
+    if not card_id:
+        return []
+    pend = db.select_all("prep_tarefas", {"select": "*", "card_id": f"eq.{card_id}", "status": "eq.pendente"})
+    desc = _ascii(it.get("descricao") or "")
+    if re.search(r"\b(tudo|todos|todas|completo)\b", desc):
+        return pend
+    vazias = {"feito", "feita", "pronto", "pronta", "resolvido", "trocado", "trocada", "colocado", "limpo", "carro"}
+    toks = {t for t in re.findall(r"[a-z0-9]{4,}", desc) if t not in vazias}
+    achadas = [t for t in pend if toks & set(re.findall(r"[a-z0-9]{4,}", _ascii(t["descricao"])))]
+    return achadas if len(achadas) == 1 else []
 
 
-def _aplicar(it, mid, em, autor, responsavel, historico, c, cards, listas, resumo) -> tuple | None:
+def _aplicar(it, mid, em, autor, responsavel, historico, c, cards, listas, resumo, lista=False) -> tuple | None:
     """Um item extraído → tarefa (com item no checklist do cartão). Devolve (card_id, descrição) do item."""
-    if it.get("acao") == "info" or not it.get("descricao"):
+    if it.get("acao") == "info" or not it.get("descricao") and it.get("acao") != "pronto_entrega":
         return None
     card = trello.achar_cartao(it.get("carro"), cards, listas)
     card_id, card_nome = (card["id"], card["name"]) if card else (None, None)
+    if it["acao"] == "pronto_entrega":  # "Kwid pronto pra entregar": todos os checklists do cartão ficam ok
+        if card_id and not historico:
+            from .entregas_grupo import marcar_pronto
+            resumo["feitas"] += marcar_pronto(card_id, c)
+        return None
     if it["acao"] == "problema":  # defeito também é algo a resolver: vira item do checklist com ⚠️
         db.insert_lock("prep_problemas", {"message_id": f"{mid}#{resumo['problemas']}#{_ascii(it['descricao'])[:30]}",
                                           "carro_texto": it.get("carro"), "card_id": card_id, "card_nome": card_nome,
@@ -177,16 +199,18 @@ def _aplicar(it, mid, em, autor, responsavel, historico, c, cards, listas, resum
         it = {**it, "descricao": f"⚠️ {it['descricao']}", "tipo": "problema"}
     aberta = _tarefa_aberta(it, card_id)
     if it["acao"] == "feito" or it.get("feito"):
-        if aberta:
-            _concluir(aberta, em, historico, c)
+        for t in ([aberta] if aberta else _feita_por_palavra(it, card_id)):
+            _concluir(t, em, historico, c)
             resumo["feitas"] += 1
         return card_id, it["descricao"]
     if aberta:
+        if lista and not aberta.get("lista"):
+            db.update("prep_tarefas", {"lista": True}, {"id": f"eq.{aberta['id']}"})
         return card_id, it["descricao"]  # lista de Missões repostada: a tarefa já existe
     t = db.insert("prep_tarefas", {"message_id": mid, "carro_texto": it.get("carro"), "card_id": card_id,
                                    "card_nome": card_nome, "tipo": it.get("tipo") or "outro",
                                    "descricao": it["descricao"], "responsavel": responsavel,
-                                   "criado_em": _iso(em), "historico": historico})
+                                   "criado_em": _iso(em), "historico": historico, "lista": lista})
     if card_id and not historico:
         try:
             item_id = trello.item_checklist(c, card_id, it["descricao"])
@@ -307,6 +331,28 @@ def checar_paradas(agora: datetime | None = None) -> int:
     for t in paradas:
         db.update("prep_tarefas", {"cobrado_em": _iso(agora)}, {"id": f"eq.{t['id']}"})
     return len(paradas)
+
+
+GRUPO = "120363185008258158@g.us"
+
+
+def resumo_grupo() -> str:
+    """Mensagem das 8h no grupo: tudo que está pendente, por carro. Substitui o recado pro Felipe."""
+    rows = db.select_all("prep_tarefas", {"select": "*", "status": "eq.pendente", "historico": "eq.false",
+                                          "order": "criado_em.asc"})
+    if not rows:
+        return ""
+    por: dict[str, list] = {}
+    for t in rows:
+        por.setdefault(_carro(t), []).append(t)
+    hoje = datetime.now(timezone.utc)
+    blocos = []
+    for carro, ts in por.items():
+        itens = "\n".join(f"• {t['descricao']}" + (f" ({(hoje - _dt(t['criado_em'])).days} dias)"
+                                                     if (hoje - _dt(t["criado_em"])).days >= 2 else "") for t in ts)
+        blocos.append(f"*{carro}*\n{itens}")
+    return (f"🔧 *Preparação — pendências de hoje ({datas.hoje():%d/%m})*\n\n" + "\n\n".join(blocos)
+            + "\n\nRespondam o que já foi feito (ex.: _Idea: volante ok_) que eu dou baixa no Trello.")
 
 
 def agenda_texto() -> str:

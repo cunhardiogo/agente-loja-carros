@@ -41,3 +41,23 @@ def test_edicao_acrescenta_e_tira_itens(monkeypatch):
     monkeypatch.setattr(pg.db, "delete", lambda *a: None)
     r = pg._edicao({"key": {"id": "m1"}, "editedMessage": {"conversation": "Kwid: limpar motor e polir farol"}}, {"key": {}})
     assert criados == ["Polir farol"] and removidos == ["i2"] and r["removidas"] == 1
+
+
+
+def test_feito_por_palavra_acha_a_tarefa_do_carro(monkeypatch):
+    pend = [{"id": "a", "descricao": "⚠️ Volante desalinhado"}, {"id": "b", "descricao": "⚠️ Tampa de mala"}]
+    monkeypatch.setattr(pg.db, "select_all", lambda t, p=None: pend)
+    assert pg._feita_por_palavra({"descricao": "Volante alinhado"}, "c1") == [pend[0]]
+    assert pg._feita_por_palavra({"descricao": "tudo feito"}, "c1") == pend
+    assert pg._feita_por_palavra({"descricao": "feito"}, "c1") == []      # genérico: não chuta
+    assert pg._feita_por_palavra({"descricao": "Volante alinhado"}, None) == []
+
+
+def test_lista_nova_da_baixa_so_no_mesmo_carro(monkeypatch):
+    from datetime import datetime, timezone
+    antigas = [{"id": "x", "descricao": "Polir farol", "card_id": "c1"}, {"id": "y", "descricao": "Lavar motor", "card_id": "c1"}]
+    feitas = []
+    monkeypatch.setattr(pg.db, "select_all", lambda t, p=None: antigas if p.get("card_id") == "eq.c1" else [])
+    monkeypatch.setattr(pg, "_concluir", lambda t, em, h, c=None: feitas.append(t["id"]))
+    n = pg._baixa_por_lista([("c1", "Lavar o motor"), ("c2", "Trocar pneu")], datetime(2026, 10, 16, tzinfo=timezone.utc), None)
+    assert n == 1 and feitas == ["x"]

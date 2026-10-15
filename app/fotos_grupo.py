@@ -1,4 +1,4 @@
-"""Grupo FOTOS: "pronto para foto" move o cartão do carro para "Preparação / Foto"; quando o Caio posta as
+"""Grupo FOTOS: "novidades" com placa criam o cartão em "Carro em trânsito"; "pronto para foto" move o cartão do carro para "Preparação / Foto"; quando o Caio posta as
 fotos (álbum + nome do carro), o cartão vai para "Estoque SB!". Só mexe em cartão que está no caminho da
 preparação — Vendidos, Finalizado e Recall ficam onde estão."""
 import json
@@ -26,6 +26,55 @@ Responda SOMENTE um JSON {"acao": "pronto_para_foto" | "fotos_feitas" | "outro",
 "carros": um texto por carro, como escrito (ou como identificado na foto)."""
 
 
+PROMPT_NOVIDADES = """Mensagem de "novidades" (carros novos chegando na loja). Liste cada carro citado.
+Responda SOMENTE JSON {"carros": [{"carro": "marca e modelo/versão", "ano": 2020 ou null, "placa": "ABC1D23" ou null}]}.
+Se a mensagem não cita carro nenhum (ex. só "NOVIDADES CHEGANDO"), devolva {"carros": []}."""
+TRANSITO = "carro em transito"
+
+
+def novidades(texto: str, mid: str) -> dict:
+    """'Novidades' com carro e placa: cria o cartão em "Carro em trânsito" (se a placa ainda não está no quadro).
+    Carro sem placa: avisa o dono."""
+    from .vendas_grupo import placa_norm
+    if db.insert_lock("prep_msgs", {"message_id": f"novidade:{mid}"}) is None:
+        return {"ignored": "duplicada"}
+    try:
+        resp = llm._client.chat.completions.create(
+            model=settings.openai_model_extracao, temperature=0, response_format={"type": "json_object"},
+            messages=[{"role": "system", "content": PROMPT_NOVIDADES}, {"role": "user", "content": texto}])
+        carros = json.loads(resp.choices[0].message.content or "{}").get("carros") or []
+    except Exception:
+        log.exception("falha lendo novidades")
+        db.delete("prep_msgs", {"message_id": f"eq.novidade:{mid}"})
+        return {"erro": "novidades"}
+    if not carros:
+        return {"ignored": "novidade_sem_carro"}
+    criados, sem_placa = [], []
+    with trello._cliente() as c:
+        cards, listas = trello.cartoes(c)
+        no_quadro = {trello._placa(cd["name"]) for cd in cards}
+        transito = next(k for k, v in listas.items() if v == TRANSITO)
+        for car in carros:
+            placa = placa_norm(car.get("placa"))
+            if not placa:
+                sem_placa.append(car.get("carro") or "?")
+                continue
+            if placa in no_quadro:
+                continue
+            nome = trello.nome_cartao({"modelo": car.get("carro"), "ano": car.get("ano"), "placa": placa}, None)
+            c.post("/cards", params={"idList": transito, "pos": "top", "name": nome}).raise_for_status()
+            no_quadro.add(placa)
+            criados.append(nome)
+    if criados or sem_placa:
+        try:
+            evolution.enviar_texto(settings.meu_numero, "🚗 *Novidades no grupo de Fotos*"
+                                   + ("\nCriei em Carro em trânsito: " + ", ".join(criados) if criados else "")
+                                   + ("\nSem placa (não criei): " + ", ".join(sem_placa) if sem_placa else ""))
+        except Exception:
+            log.exception("falha avisando novidades")
+    return {"criados": criados, "sem_placa": sem_placa}
+
+
 def classificar(texto: str, autor_caio: bool, imagem: tuple | None) -> dict:
     conteudo: list = [{"type": "text", "text": f"Autor: {'Caio (fotógrafo)' if autor_caio else 'equipe'}\n"
                                                f"Mensagem: {texto or '(só foto)'}"}]
@@ -46,6 +95,8 @@ def processar(data: dict, instancia: str, apikey: str, aplicar: bool = True) -> 
     tem_imagem = bool(msg.get("imageMessage"))
     autor = key.get("participant") or ("eu" if key.get("fromMe") else "")
     quando = _quando(data).timestamp()
+    if "novidade" in a:  # carros novos chegando: cartão em "Carro em trânsito"
+        return novidades(texto, key.get("id")) if aplicar else {"novidades": texto[:60]}
     if "pront" in a and not autor_caio:
         _ultimo_pronto[autor] = quando
     foto_apos_pronto = tem_imagem and not texto and not autor_caio and quando - _ultimo_pronto.get(autor, 0) <= 600

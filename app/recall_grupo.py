@@ -293,6 +293,29 @@ def garantia_ate(r: dict) -> date | None:
     return date.fromisoformat(d) + timedelta(days=GARANTIA_DIAS) if d else None
 
 
+GRUPO = "120363414450144897@g.us"
+
+
+def resumo_grupo() -> str:
+    """Mensagem das 8h no grupo de recall: todos os abertos, cobrando o próximo passo de cada um."""
+    rows = _abertos()
+    if not rows:
+        return ""
+    agora = datetime.now(timezone.utc)
+    linhas = []
+    for r in rows:
+        dias = (agora - _dt(r["aberto_em"])).days
+        if r["status"] == "agendado" and r.get("agendado_para"):
+            situacao = f"agendado {_dt(r['agendado_para']).astimezone(datas.TZ):%d/%m %H:%M} — confirmar com o cliente"
+        elif r["status"] == "na_loja":
+            situacao = "na loja — quando fica pronto?"
+        else:
+            situacao = "SEM DATA — quando o cliente traz?"
+        linhas.append(f"*{_rotulo(r)}* ({dias} dias)\n{r.get('motivo') or '?'}\n👉 {situacao}")
+    return (f"🔁 *Recall em aberto ({len(rows)}) — {datas.hoje():%d/%m}*\n\n" + "\n\n".join(linhas)
+            + "\n\nQuando ficar pronto, avisem aqui (\"pronto\") respondendo ao recall.")
+
+
 def agenda_texto(hoje: str | None = None) -> str:
     hoje = hoje or datas.hoje_iso()
     rows = _abertos()
