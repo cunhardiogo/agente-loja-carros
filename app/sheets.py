@@ -172,11 +172,33 @@ def _importar(planilha: list[dict], vis: dict[str, dict], editaveis: dict, conve
                     novo.update(converter(col, linha[col]))
             db.insert(tabela, novo)
             n += 1
-    for rid, r in vis.items():
-        if r.get("planilha_snap") and rid not in vistos:
-            db.update(tabela, {"removido": True}, {"id": f"eq.{rid}"})
-            n += 1
+    sumidos = [rid for rid, r in vis.items() if r.get("planilha_snap") and rid not in vistos]
+    # aba vazia ou apagão de linhas = leitura falhou ou alguém limpou a aba: não apaga nada, avisa o dono
+    if sumidos and (not planilha or len(sumidos) > max(3, len(vis) // 5)):
+        _avisar_sumico(tabela, len(sumidos))
+        return n
+    for rid in sumidos:
+        db.update(tabela, {"removido": True}, {"id": f"eq.{rid}"})
+        n += 1
     return n
+
+
+_avisado: dict = {}
+
+
+def _avisar_sumico(tabela: str, qtd: int) -> None:
+    import time
+    if time.time() - _avisado.get(tabela, 0) < 6 * 3600:
+        return
+    _avisado[tabela] = time.time()
+    try:
+        from . import evolution
+        evolution.enviar_texto(settings.meu_numero,
+                               f"⚠️ A aba de {tabela} da planilha de controle veio com {qtd} linhas faltando (ou vazia). "
+                               f"Não apaguei nada no sistema — a planilha vai ser reescrita com os dados certos. "
+                               f"Se alguém apagou de propósito, me fala o que remover.")
+    except Exception:
+        log.exception("falha avisando sumiço na planilha")
 
 
 def importar_edicoes(planilha: list[dict], leads_vis: dict[str, dict]) -> int:

@@ -78,3 +78,16 @@ def test_cada_um_confirma_so_o_que_pediu(monkeypatch):
     import app.evolution as ev
     monkeypatch.setattr(ev, "enviar_texto", lambda n, t: None)
     assert acoes.tentar_confirmar("ok", "5521994110597").startswith("✅") and feitos == ["f1"]
+
+
+def test_planilha_vazia_nao_apaga_nada(monkeypatch):
+    from app import sheets
+    apagados, avisos = [], []
+    monkeypatch.setattr(sheets.db, "update", lambda t, d, f: apagados.append(f["id"]))
+    monkeypatch.setattr(sheets, "_avisar_sumico", lambda t, n: avisos.append(n))
+    vis = {f"v{i}": {"id": f"v{i}", "planilha_snap": {"Carro": "x"}} for i in range(20)}
+    assert sheets._importar([], vis, {}, None, "vendas", lambda r: "", (), dict) == 0
+    assert apagados == [] and avisos == [20]
+    linhas = [{"ID": f"v{i}"} for i in range(19)]  # uma linha apagada de verdade: apaga só ela
+    sheets._importar(linhas, vis, {}, None, "vendas", lambda r: "", (), dict)
+    assert apagados == ["eq.v19"]
