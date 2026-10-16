@@ -312,10 +312,35 @@ def _queda(texto, autor, em) -> dict:
     return {"queda": alvo["id"]}
 
 
+_ATRIBUI = re.compile(r"(?i)^\W*(a\s+)?venda\s+(e\s+|é\s+)?(d[oae]|pr[oa]|pra|para)\s+(?P<nome>[\wÀ-ú]+)\W*$")
+
+
+def _atribuicao(texto: str, autor: str | None, em: datetime, vends: list[dict]) -> dict | None:
+    """'Venda do Edinho' logo depois de avisar uma venda = essa venda é de outro vendedor, não é carro novo.
+    Troca o vendedor da última venda avisada pelo mesmo autor (até 2 h antes)."""
+    m = _ATRIBUI.match(texto.strip())
+    if not m:
+        return None
+    vend = vendedor_por_nome(m.group("nome"), vends)
+    if not vend:
+        return None
+    r = db.select("vendas", {"select": "id,modelo,versao,placa,ano,vendedor_id", "autor": f"eq.{autor}",
+                             "removido": "eq.false", "aviso_em": f"gte.{_iso(em - timedelta(hours=2))}",
+                             "order": "aviso_em.desc", "limit": "1"})
+    if not r:
+        return {"ignored": "atribuicao_sem_venda"}
+    db.update("vendas", {"vendedor_id": vend["id"]}, {"id": f"eq.{r[0]['id']}"})
+    sujo["v"] = True
+    return {"atribuida": r[0]["id"], "vendedor": vend["nome"]}
+
+
 def _aviso(tipo, texto, mid, autor, em, historico) -> dict:
     if tipo == "queda":
         return _queda(texto, autor, em)
     vends = _vendedores()
+    atrib = _atribuicao(texto, autor, em, vends)
+    if atrib is not None:
+        return atrib
     vend = vendedor_por_nome(texto, vends) or vendedor_por_lid(autor, vends)
     placa = placa_norm(texto)
     modelo = _modelo_do_aviso(texto)

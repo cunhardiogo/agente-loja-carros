@@ -200,3 +200,15 @@ def test_resumo_com_carro_na_versao_casa_com_a_reserva(monkeypatch):
     monkeypatch.setattr(vg.db, "select", lambda t, p=None: [reserva])
     assert vg._venda_aberta_do_vendedor("c", "Yamaha Xmax") is reserva
     assert vg._venda_aberta_do_vendedor("c", "Yamaha Nmax") is None
+
+
+def test_venda_do_fulano_e_recado_nao_venda_nova(monkeypatch):
+    from datetime import datetime, timezone
+    from app import vendas_grupo as vg
+    vends = [{"id": "e1", "nome": "Edson", "apelidos": ["Edinho"]}, {"id": "c1", "nome": "Carlos", "apelidos": []}]
+    trocas = []
+    monkeypatch.setattr(vg.db, "select", lambda t, p=None: [{"id": "wrv", "modelo": "WR-V"}])
+    monkeypatch.setattr(vg.db, "update", lambda t, d, f: trocas.append((d, f["id"])))
+    r = vg._atribuicao("Venda do Edinho", "carlos@lid", datetime(2026, 10, 15, 21, 40, tzinfo=timezone.utc), vends)
+    assert r == {"atribuida": "wrv", "vendedor": "Edson"} and trocas == [({"vendedor_id": "e1"}, "eq.wrv")]
+    assert vg._atribuicao("Kwid vendido", "carlos@lid", datetime(2026, 10, 15, tzinfo=timezone.utc), vends) is None
