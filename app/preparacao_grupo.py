@@ -55,6 +55,38 @@ def extrair(texto: str, imagem_b64: str | None = None, mime: str | None = None) 
 
 
 FOTO_MIN = 10
+_OK_FIM = re.compile(r"(?i)[\s\-–—:]*(ok|feito|feita|pronto|pronta|resolvido|✓|✅|✔️?)\s*$")
+
+
+def placa_norm_txt(texto: str | None) -> str | None:
+    from .vendas_grupo import placa_norm
+    return placa_norm(re.sub(r"\s", "", texto or "")) or placa_norm(texto)
+
+
+def eh_resumo_repostado(texto: str | None) -> bool:
+    return bool(texto) and "pendencias de hoje" in _ascii(texto.splitlines()[0] if texto else "")
+
+
+def baixa_por_resumo(texto: str, em: datetime, historico: bool = False) -> dict:
+    """Resumo das 8h devolvido com '- ok' nos itens: cada linha marcada dá baixa na tarefa daquele carro."""
+    pend = db.select_all("prep_tarefas", {"select": "*", "status": "eq.pendente", "historico": "eq.false"})
+    carro_atual, feitas = None, 0
+    for linha in texto.splitlines():
+        s = linha.strip()
+        if s.startswith("*") and s.endswith("*") and len(s) > 2:
+            carro_atual = s.strip("*").strip()
+            continue
+        if not s.startswith("•") or not carro_atual or not _OK_FIM.search(s):
+            continue
+        desc = _OK_FIM.sub("", s.lstrip("• ")).strip()
+        desc = re.sub(r"\s*\(\d+ dias?\)\s*$", "", desc).strip()
+        alvo = next((t for t in pend if _carro(t) == carro_atual and t["descricao"].strip() == desc), None) or \
+            next((t for t in pend if _carro(t) == carro_atual and _parecida(t["descricao"], desc)), None)
+        if alvo:
+            _concluir(alvo, em, historico)
+            pend.remove(alvo)
+            feitas += 1
+    return {"feitas": feitas, "via": "resumo"}
 
 
 def identificar_carro(imagem_b64: str, mime: str | None = None) -> str | None:
@@ -127,12 +159,19 @@ def processar(data: dict, instancia: str, apikey: str, historico: bool = False) 
             _concluir(t, em, historico)
             n += 1
         return {"feitas": n}
+    if eh_resumo_repostado(texto):  # o resumo das 8h copiado com "- ok" nos itens feitos: lido linha a linha
+        return baixa_por_resumo(texto, em, historico)
     try:
         itens = extrair(texto, *(img or (None, None)))
+        placa_foto = None
+        if img and any(not placa_norm_txt(it.get("carro")) for it in itens):
+            placa_foto = identificar_carro(*img)  # leitura dedicada da placa (a extração geral às vezes só descreve o carro)
     except Exception:
         log.exception("falha extraindo preparação")
         db.delete("prep_msgs", {"message_id": f"eq.{mid}"})  # libera pra repescagem tentar de novo
         return {"erro": "extracao"}
+    if placa_foto and placa_norm_txt(placa_foto):
+        itens = [it if placa_norm_txt(it.get("carro")) else {**it, "carro": placa_foto} for it in itens]
     responsavel = _mencionado(data)
     resumo = {"tarefas": 0, "feitas": 0, "problemas": 0}
     if any(not it.get("carro") for it in itens):  # "Volante desalinhado" depois da foto da placa: mesmo carro

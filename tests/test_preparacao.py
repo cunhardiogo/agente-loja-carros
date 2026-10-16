@@ -61,3 +61,19 @@ def test_lista_nova_da_baixa_so_no_mesmo_carro(monkeypatch):
     monkeypatch.setattr(pg, "_concluir", lambda t, em, h, c=None: feitas.append(t["id"]))
     n = pg._baixa_por_lista([("c1", "Lavar o motor"), ("c2", "Trocar pneu")], datetime(2026, 10, 16, tzinfo=timezone.utc), None)
     assert n == 1 and feitas == ["x"]
+
+
+def test_resumo_repostado_com_ok_da_baixa_linha_a_linha(monkeypatch):
+    from datetime import datetime, timezone
+    pend = [{"id": "1", "card_nome": "Toyota Yaris Sedan 2023 (RJF-6C90)", "descricao": "Limpar caixa de roda"},
+            {"id": "2", "card_nome": "Toyota Yaris Sedan 2023 (RJF-6C90)", "descricao": "Comprar placa dianteira"},
+            {"id": "3", "card_nome": "Nissan Kicks SL 2020 (RKU-0J89)", "descricao": "⚠️ Mofado por baixo dos tapetes"}]
+    feitas = []
+    monkeypatch.setattr(pg.db, "select_all", lambda t, p=None: list(pend))
+    monkeypatch.setattr(pg, "_concluir", lambda t, em, h, c=None: feitas.append(t["id"]))
+    texto = ("🔧 *Preparação — pendências de hoje (16/10)*\n\n*Nissan Kicks SL 2020 (RKU-0J89)*\n"
+             "• ⚠️ Mofado por baixo dos tapetes (5 dias) - ok\n\n*Toyota Yaris Sedan 2023 (RJF-6C90)*\n"
+             "• Comprar placa dianteira (5 dias)\n• Limpar caixa de roda (5 dias) - ok\n")
+    assert pg.eh_resumo_repostado(texto)
+    assert pg.baixa_por_resumo(texto, datetime(2026, 10, 16, tzinfo=timezone.utc))["feitas"] == 2
+    assert sorted(feitas) == ["1", "3"]
