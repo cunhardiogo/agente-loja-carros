@@ -3,6 +3,7 @@ fotos (álbum + nome do carro), o cartão vai para "Estoque SB!". Só mexe em ca
 preparação — Vendidos, Finalizado e Recall ficam onde estão."""
 import json
 import logging
+import re
 
 from . import db, evolution, llm, trello
 from .config import settings
@@ -30,6 +31,20 @@ PROMPT_NOVIDADES = """Mensagem de "novidades" (carros novos chegando na loja). L
 Responda SOMENTE JSON {"carros": [{"carro": "marca e modelo/versão", "ano": 2020 ou null, "placa": "ABC1D23" ou null}]}.
 Se a mensagem não cita carro nenhum (ex. só "NOVIDADES CHEGANDO"), devolva {"carros": []}."""
 TRANSITO = "carro em transito"
+NOVIDADE_MIN = 30
+_ultima_novidade: dict[str, float] = {}  # autor → quando postou o cabeçalho "NOVIDADE CHEGANDO"
+
+
+def _placa_autocerto(carro: str | None, ano) -> str | None:
+    """Carro sem placa na novidade: procura no estoque do Autocerto pelo modelo e ano (só se achar um)."""
+    from . import autocerto
+    from .leads import _ascii
+    if not carro or not autocerto.configurado():
+        return None
+    toks = [t for t in re.split(r"[^a-z0-9]+", _ascii(carro)) if len(t) >= 2 and not re.fullmatch(r"(19|20)\d{2}", t)]
+    achados = [i for i in autocerto.estoque()
+               if toks and all(t in _ascii(i["carro"]) for t in toks[:2]) and (not ano or str(i.get("ano")) == str(ano))]
+    return achados[0]["placa"] if len(achados) == 1 and achados[0].get("placa") else None
 
 
 def novidades(texto: str, mid: str) -> dict:
@@ -55,7 +70,7 @@ def novidades(texto: str, mid: str) -> dict:
         no_quadro = {trello._placa(cd["name"]) for cd in cards}
         transito = next(k for k, v in listas.items() if v == TRANSITO)
         for car in carros:
-            placa = placa_norm(car.get("placa"))
+            placa = placa_norm(car.get("placa")) or placa_norm(_placa_autocerto(car.get("carro"), car.get("ano")))
             if not placa:
                 sem_placa.append(car.get("carro") or "?")
                 continue
@@ -96,7 +111,10 @@ def processar(data: dict, instancia: str, apikey: str, aplicar: bool = True) -> 
     autor = key.get("participant") or ("eu" if key.get("fromMe") else "")
     quando = _quando(data).timestamp()
     if "novidade" in a:  # carros novos chegando: cartão em "Carro em trânsito"
+        _ultima_novidade[autor] = quando
         return novidades(texto, key.get("id")) if aplicar else {"novidades": texto[:60]}
+    if texto and not autor_caio and len(texto) > 15 and quando - _ultima_novidade.get(autor, 0) <= NOVIDADE_MIN * 60:
+        return novidades(texto, key.get("id")) if aplicar else {"novidades": texto[:60]}  # carros logo depois do cabeçalho
     if "pront" in a and not autor_caio:
         _ultimo_pronto[autor] = quando
     foto_apos_pronto = tem_imagem and not texto and not autor_caio and quando - _ultimo_pronto.get(autor, 0) <= 600

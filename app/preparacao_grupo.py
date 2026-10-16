@@ -178,6 +178,10 @@ def processar(data: dict, instancia: str, apikey: str, historico: bool = False) 
         log.exception("falha extraindo preparação")
         db.delete("prep_msgs", {"message_id": f"eq.{mid}"})  # libera pra repescagem tentar de novo
         return {"erro": "extracao"}
+    placas_txt = set(re.findall(r"\b[A-Za-z]{3}-?\d[A-Za-z0-9]\d{2}\b", texto or ""))
+    if len(placas_txt) == 1:  # placa escrita no texto vale mais que a descrição da foto ("BYD branco")
+        placa_txt = placas_txt.pop()
+        itens = [it if placa_norm_txt(it.get("carro")) else {**it, "carro": placa_txt} for it in itens]
     if placa_foto and placa_norm_txt(placa_foto):
         itens = [it if placa_norm_txt(it.get("carro")) else {**it, "carro": placa_foto} for it in itens]
     responsavel = _mencionado(data)
