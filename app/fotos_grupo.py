@@ -41,7 +41,8 @@ def _placa_autocerto(carro: str | None, ano) -> str | None:
     from .leads import _ascii
     if not carro or not autocerto.configurado():
         return None
-    toks = [t for t in re.split(r"[^a-z0-9]+", _ascii(carro)) if len(t) >= 2 and not re.fullmatch(r"(19|20)\d{2}", t)]
+    # "2008"/"3008" é modelo, não ano: só descarta o número que é o próprio ano informado
+    toks = [t for t in re.split(r"[^a-z0-9]+", _ascii(carro)) if len(t) >= 2 and t != str(ano or "")]
     achados = [i for i in autocerto.estoque()
                if toks and all(t in _ascii(i["carro"]) for t in toks[:2]) and (not ano or str(i.get("ano")) == str(ano))]
     return achados[0]["placa"] if len(achados) == 1 and achados[0].get("placa") else None
@@ -112,8 +113,9 @@ def completar_placas() -> list[str]:
             if listas.get(cd["idList"]) == trello.FINALIZADO or trello._placa(cd["name"]):
                 continue
             base = re.sub(r"\s+-\s+[A-Za-zÀ-ú]+$", "", cd["name"])  # tira " - Vendedor"
-            ano = re.search(r"\b(19|20)\d{2}\b", base)
-            toks = [t for t in re.split(r"[^a-z0-9]+", _ascii(base)) if len(t) >= 2 and not re.fullmatch(r"(19|20)\d{2}", t)]
+            anos = re.findall(r"\b(?:19|20)\d{2}\b", base)
+            ano = re.search(re.escape(anos[-1]), base) if anos else None  # o ano é o ÚLTIMO número (Peugeot 2008 ... 2022)
+            toks = [t for t in re.split(r"[^a-z0-9]+", _ascii(base)) if len(t) >= 2 and t != (anos[-1] if anos else "")]
             marca = {"fiat", "vw", "volkswagen", "gwm", "renault", "chevrolet", "ford", "honda", "toyota", "hyundai",
                      "nissan", "jeep", "mitsubishi", "mit", "byd", "peugeot", "citroen", "kia", "chery", "bmw", "yamaha"}
             modelo = [t for t in toks if t not in marca]

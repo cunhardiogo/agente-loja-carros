@@ -97,13 +97,19 @@ def nome_cartao(v: dict, vendedor: str | None) -> str:
             modelo = " ".join(modelo.split()[1:]) or modelo
     elif marca:
         modelo = " ".join(modelo.split()[1:]) or versao
-    modelo = re.sub(r"\b(19|20)\d{2}\b", "", modelo).strip()
+    # tira o ano do texto do modelo, mas não o número que é o modelo (Peugeot 2008, 3008)
+    anos = re.findall(r"\b(?:19|20)\d{2}\b", modelo)
+    tirar = str(v["ano"]) if v.get("ano") else (anos[-1] if len(anos) > 1 or (anos and not re.search(r"(?i)peugeot", modelo)) else None)
+    ano_nome = v.get("ano") or tirar
+    if tirar:
+        modelo = re.sub(rf"\b{tirar}\b", "", modelo, count=1)
+    modelo = re.sub(r"\s+", " ", modelo).strip()
     primeira = _ascii(modelo).split()[0] if modelo else ""
     marca = marca or _MARCA_DO_MODELO.get(primeira)
     nome_modelo = " ".join(w.upper() if any(ch.isdigit() for ch in w) or _ascii(w) in {"byd", "gti", "xei"}
                            else w.capitalize() for w in modelo.split())
     placa = (v.get("placa") or "").replace("-", "").upper()
-    nome = " ".join(x for x in (marca, nome_modelo, str(v.get("ano") or "")) if x)
+    nome = " ".join(x for x in (marca, nome_modelo, str(ano_nome or "")) if x)
     if len(placa) == 7:
         nome += f" ({placa[:3]}-{placa[3:]})"
     return f"{nome} - {vendedor}" if vendedor else nome

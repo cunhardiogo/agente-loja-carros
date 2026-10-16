@@ -20,7 +20,7 @@ def test_cartao_sem_placa_por_modelo_e_ano():
 def test_nome_do_cartao_novo():
     v = {"modelo": "FIAT", "versao": "Fastback", "ano": 2026, "placa": "TTD9E46"}
     assert trello.nome_cartao(v, "Carlos") == "Fiat Fastback 2026 (TTD-9E46) - Carlos"
-    assert trello.nome_cartao({"modelo": "Xmax 2026", "placa": None}, "Carlos") == "Yamaha Xmax - Carlos"
+    assert trello.nome_cartao({"modelo": "Xmax 2026", "placa": None}, "Carlos") == "Yamaha Xmax 2026 - Carlos"
     assert trello.nome_cartao({"modelo": "FIT", "versao": "LX", "ano": 2018, "placa": "LUH6H38"}, "Vinicius") == "Honda Fit 2018 (LUH-6H38) - Vinicius"
 
 
