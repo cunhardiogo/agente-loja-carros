@@ -71,8 +71,13 @@ def novidades(texto: str, mid: str) -> dict:
         transito = next(k for k, v in listas.items() if v == TRANSITO)
         for car in carros:
             placa = placa_norm(car.get("placa")) or placa_norm(_placa_autocerto(car.get("carro"), car.get("ano")))
-            if not placa:
-                sem_placa.append(car.get("carro") or "?")
+            if not placa:  # cria com o modelo; a placa entra depois (procura no Autocerto a cada 2 dias)
+                nome = trello.nome_cartao({"modelo": car.get("carro"), "ano": car.get("ano")}, None)
+                if any(cd["name"] == nome and listas.get(cd["idList"]) == TRANSITO for cd in cards):
+                    continue
+                c.post("/cards", params={"idList": transito, "pos": "top", "name": nome}).raise_for_status()
+                cards.append({"name": nome, "idList": transito})
+                sem_placa.append(nome)
                 continue
             if placa in no_quadro:
                 continue
@@ -84,10 +89,53 @@ def novidades(texto: str, mid: str) -> dict:
         try:
             evolution.enviar_texto(settings.meu_numero, "🚗 *Novidades no grupo de Fotos*"
                                    + ("\nCriei em Carro em trânsito: " + ", ".join(criados) if criados else "")
-                                   + ("\nSem placa (não criei): " + ", ".join(sem_placa) if sem_placa else ""))
+                                   + ("\nCriei sem placa (procuro no Autocerto a cada 2 dias): " + ", ".join(sem_placa)
+                                      if sem_placa else ""))
         except Exception:
             log.exception("falha avisando novidades")
     return {"criados": criados, "sem_placa": sem_placa}
+
+
+def completar_placas() -> list[str]:
+    """Cartões sem placa (fora do FINALIZADO): acha a placa no Autocerto pelo modelo e ano e põe no nome do cartão.
+    Só quando o Autocerto tem UM carro que bate e a placa ainda não está em outro cartão."""
+    from . import autocerto
+    from .leads import _ascii
+    if not (trello.configurado() and autocerto.configurado()):
+        return []
+    estoque = autocerto.estoque(forcar=True)
+    feitos = []
+    with trello._cliente() as c:
+        cards, listas = trello.cartoes(c)
+        usadas = {trello._placa(cd["name"]) for cd in cards if trello._placa(cd["name"])}
+        for cd in cards:
+            if listas.get(cd["idList"]) == trello.FINALIZADO or trello._placa(cd["name"]):
+                continue
+            base = re.sub(r"\s+-\s+[A-Za-zÀ-ú]+$", "", cd["name"])  # tira " - Vendedor"
+            ano = re.search(r"\b(19|20)\d{2}\b", base)
+            toks = [t for t in re.split(r"[^a-z0-9]+", _ascii(base)) if len(t) >= 2 and not re.fullmatch(r"(19|20)\d{2}", t)]
+            marca = {"fiat", "vw", "volkswagen", "gwm", "renault", "chevrolet", "ford", "honda", "toyota", "hyundai",
+                     "nissan", "jeep", "mitsubishi", "mit", "byd", "peugeot", "citroen", "kia", "chery", "bmw", "yamaha"}
+            modelo = [t for t in toks if t not in marca]
+            if not modelo:
+                continue
+            achados = [i for i in estoque if all(t in _ascii(i["carro"]) for t in modelo[:2])
+                       and (not ano or str(i.get("ano")) == ano.group())
+                       and (i.get("placa") or "").replace("-", "").upper() not in usadas]
+            if len(achados) != 1 or not achados[0].get("placa"):
+                continue
+            p = achados[0]["placa"].replace("-", "").upper()
+            novo = cd["name"].replace(base, f"{base} ({p[:3]}-{p[3:]})", 1)
+            c.put(f"/cards/{cd['id']}", params={"name": novo}).raise_for_status()
+            usadas.add(p)
+            feitos.append(novo)
+    if feitos:
+        try:
+            evolution.enviar_texto(settings.meu_numero, "🔎 Achei no Autocerto a placa de cartões que estavam sem:\n"
+                                   + "\n".join(f"• {n}" for n in feitos))
+        except Exception:
+            log.exception("falha avisando placas completadas")
+    return feitos
 
 
 def classificar(texto: str, autor_caio: bool, imagem: tuple | None) -> dict:

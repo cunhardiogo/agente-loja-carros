@@ -50,6 +50,7 @@ _ult_planilha = {"t": 0.0}
 _ult_controle = {"t": 0.0}
 _ult_trello = {"t": 0.0}
 _ult_saude = {"conexao": 0.0, "repesca": 0.0, "ia": 0.0}
+PLACAS_INTERVALO = 2 * 24 * 3600  # cartões sem placa: procura no Autocerto a cada 2 dias
 _lojasb_ok = {"v": True}
 _tick_lock = threading.Lock()
 
@@ -113,6 +114,13 @@ def _tick_inner() -> None:
                 fn()
             except Exception:
                 log.exception("erro na checagem de saúde %s", chave)
+    try:
+        ultimo = float(flags.valor("placas_autocerto_em") or 0)
+        if agora_t - ultimo > PLACAS_INTERVALO:
+            flags.definir("placas_autocerto_em", valor=str(agora_t))
+            fotos_grupo.completar_placas()
+    except Exception:
+        log.exception("erro completando placas pelo Autocerto")
     if _time.time() - _ult_trello["t"] > 180:  # quadro ESTOQUE do Trello a cada ~3 min
         _ult_trello["t"] = _time.time()
         try:

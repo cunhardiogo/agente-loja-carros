@@ -81,7 +81,7 @@ _MARCA_DO_MODELO = {
     "pajero": "Mitsubishi", "nivus": "Volkswagen", "polo": "Volkswagen", "jetta": "Volkswagen", "gol": "Volkswagen",
     "countryman": "Mini", "dolphin": "BYD", "seal": "BYD", "king": "BYD", "ka": "Ford", "ecosport": "Ford",
 }
-_MARCAS = {"fiat": "Fiat", "renault": "Renault", "peugeot": "Peugeot", "chevrolet": "Chevrolet", "honda": "Honda",
+_MARCAS = {"vw": "Volkswagen", "gwm": "GWM", "mit": "Mitsubishi", "chevy": "Chevrolet", "gm": "Chevrolet", "fiat": "Fiat", "renault": "Renault", "peugeot": "Peugeot", "chevrolet": "Chevrolet", "honda": "Honda",
            "toyota": "Toyota", "hyundai": "Hyundai", "nissan": "Nissan", "jeep": "Jeep", "citroen": "Citroen",
            "mitsubishi": "Mitsubishi", "byd": "BYD", "yamaha": "Yamaha", "volkswagen": "Volkswagen", "ford": "Ford",
            "mini": "Mini", "suzuki": "Suzuki", "kia": "Kia", "bmw": "BMW"}
@@ -93,6 +93,8 @@ def nome_cartao(v: dict, vendedor: str | None) -> str:
     marca = _MARCAS.get(_ascii(modelo).split()[0] if modelo else "")
     if marca and _ascii(modelo) in _MARCAS and versao:  # resumo com 'Modelo: FIAT / Versão: Fastback'
         modelo = versao
+        if _ascii(modelo).split()[0] == _ascii(v.get("modelo") or "").strip():  # 'BYD / BYD DOLPHIN' → 'DOLPHIN'
+            modelo = " ".join(modelo.split()[1:]) or modelo
     elif marca:
         modelo = " ".join(modelo.split()[1:]) or versao
     modelo = re.sub(r"\b(19|20)\d{2}\b", "", modelo).strip()
