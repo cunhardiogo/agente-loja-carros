@@ -32,6 +32,12 @@ def _autor_nome(data: dict) -> str | None:
 def linha(data: dict, conversa: str | None) -> dict | None:
     key = data.get("key") or {}
     msg = data.get("message") or {}
+    pm = msg.get("protocolMessage") or {}
+    if pm.get("editedMessage") and key.get("id"):  # edição: guarda o texto novo (e marca como vista p/ repescagem)
+        return {"message_id": key["id"], "jid": key.get("remoteJid"), "conversa": conversa,
+                "autor": key.get("participant"), "autor_nome": _autor_nome(data), "from_me": bool(key.get("fromMe")),
+                "tipo": "edicao", "texto": _texto(pm["editedMessage"]) or None,
+                "citada": (pm.get("key") or {}).get("id"), "em": _iso(_quando(data))}
     if not key.get("id") or not msg or "protocolMessage" in msg or "reactionMessage" in msg:
         return None
     tipo = next((t for k, t in _TIPOS.items() if msg.get(k)), "texto" if _texto(msg) else "outro")

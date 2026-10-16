@@ -107,8 +107,16 @@ def _carro_da_foto(autor: str, em: datetime) -> str | None:
     return r[0]["carro"] if r and _dt(r[0]["em"]) <= em else None
 
 
+_LADOS = [("diant", "tras"), ("direit", "esquerd"), ("motorist", "carona")]
+
+
 def _parecida(a: str, b: str) -> bool:
-    return SequenceMatcher(None, _ascii(a), _ascii(b)).ratio() >= 0.72
+    """Mesma tarefa escrita diferente. Lados opostos (dianteiro/traseiro, direito/esquerdo...) nunca são a mesma."""
+    x, y = _ascii(a), _ascii(b)
+    for l1, l2 in _LADOS:
+        if (l1 in x and l2 in y and l1 not in y) or (l2 in x and l1 in y and l2 not in y):
+            return False
+    return SequenceMatcher(None, x, y).ratio() >= 0.72
 
 
 def _tarefa_aberta(item: dict, card_id: str | None) -> dict | None:
@@ -274,6 +282,10 @@ def _edicao(pm: dict, data: dict) -> dict:
         log.exception("falha extraindo edição da preparação")
         return {"erro": "extracao"}
     em = _dt(antigas[0]["criado_em"])
+    carro_original = next((t.get("card_nome") or t.get("carro_texto") for t in antigas
+                           if t.get("card_nome") or t.get("carro_texto")), None)
+    if carro_original:  # legenda de foto não diz o carro: item novo vai pro carro da mensagem original
+        itens = [it if it.get("carro") else {**it, "carro": carro_original} for it in itens]
     resumo = {"tarefas": 0, "feitas": 0, "problemas": 0, "removidas": 0}
     with trello._cliente() as c:
         cards, listas = trello.cartoes(c)

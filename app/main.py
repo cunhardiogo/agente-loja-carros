@@ -389,6 +389,12 @@ def _edicao_normalizada(body: dict) -> dict | None:
 
 
 def _rotear_evento(body: dict) -> dict:
+    sec = ((body.get("data") or {}).get("message") or {}).get("secretEncryptedMessage")
+    if sec and sec.get("secretEncType") == 2:  # edição criptografada: decifra e trata como edição normal
+        from . import edicoes
+        norm = edicoes.como_edicao(body["data"])
+        if norm:
+            body = {**body, "data": norm}
     if (body.get("event") or "").lower().replace("_", ".") == "messages.edited":
         norm = _edicao_normalizada(body)
         if norm is None:
