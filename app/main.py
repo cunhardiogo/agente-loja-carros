@@ -395,6 +395,11 @@ def _rotear_evento(body: dict) -> dict:
         norm = edicoes.como_edicao(body["data"])
         if norm:
             body = {**body, "data": norm}
+        else:
+            try:  # guarda o caso que falhou pra conferir o formato
+                db.insert("webhook_amostras", {"evento": "edicao_nao_decifrada", "corpo": body})
+            except Exception:
+                log.exception("falha guardando amostra")
     if (body.get("event") or "").lower().replace("_", ".") == "messages.edited":
         norm = _edicao_normalizada(body)
         if norm is None:

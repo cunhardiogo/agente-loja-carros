@@ -74,14 +74,27 @@ def _texto_editado(plano: bytes, alvo_id: str) -> str | None:
     return max(cands, key=len).strip() if cands else None
 
 
+def _bytes(v) -> bytes:
+    """O webhook pode mandar bytes como base64, como {"type": "Buffer", "data": [...]} ou como lista/dict de ints."""
+    if isinstance(v, (bytes, bytearray)):
+        return bytes(v)
+    if isinstance(v, str):
+        return base64.b64decode(v)
+    if isinstance(v, dict):
+        if "data" in v:
+            return bytes(v["data"])
+        return bytes(v[k] for k in sorted(v, key=lambda x: int(x)))
+    return bytes(v)
+
+
 def decifrar(edicao: dict, original: dict) -> str | None:
     s = (edicao.get("message") or {}).get("secretEncryptedMessage") or {}
     segredo = ((original.get("message") or {}).get("messageContextInfo") or {}).get("messageSecret")
     if s.get("secretEncType") != MESSAGE_EDIT or not segredo:
         return None
     alvo = s["targetMessageKey"]["id"]
-    chave_s = base64.b64decode(segredo)
-    iv, carga = base64.b64decode(s["encIv"]), base64.b64decode(s["encPayload"])
+    chave_s = _bytes(segredo)
+    iv, carga = _bytes(s["encIv"]), _bytes(s["encPayload"])
     k0 = hmac.new(b"\x00" * 32, chave_s, hashlib.sha256).digest()
     jids = [j for j in dict.fromkeys([original.get("key", {}).get("participant"), original.get("key", {}).get("participantAlt"),
                                       edicao.get("key", {}).get("participant"), edicao.get("key", {}).get("participantAlt"),
