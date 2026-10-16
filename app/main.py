@@ -365,7 +365,35 @@ def _handle_event(body: dict) -> dict:
         return {"error": str(e)}
 
 
+def _edicao_normalizada(body: dict) -> dict | None:
+    """Evento messages.edited da Evolution → mesmo formato da edição que já tratamos
+    (protocolMessage com a chave da mensagem original + editedMessage)."""
+    data = body.get("data") or {}
+    try:
+        if db.select("webhook_amostras", {"select": "id", "evento": "eq.messages.edited", "limit": "20"}).__len__() < 20:
+            db.insert("webhook_amostras", {"evento": "messages.edited", "corpo": body})  # amostras p/ conferir o formato
+    except Exception:
+        log.exception("falha guardando amostra de edição")
+    msg = data.get("message") or {}
+    pm = msg.get("protocolMessage") or {}
+    if pm.get("editedMessage"):
+        return data
+    editado = (msg.get("editedMessage") or {}).get("message") or pm.get("editedMessage") or data.get("editedMessage") \
+        or ({k: v for k, v in msg.items() if k != "messageContextInfo"} if msg else None)
+    key = data.get("key") or {}
+    original = pm.get("key") or data.get("originalKey") or key
+    if not editado or not original.get("id"):
+        return None
+    return {**data, "key": {**key, "id": f"{key.get('id')}-ed"},
+            "message": {"protocolMessage": {"key": original, "type": 14, "editedMessage": editado}}}
+
+
 def _rotear_evento(body: dict) -> dict:
+    if (body.get("event") or "").lower().replace("_", ".") == "messages.edited":
+        norm = _edicao_normalizada(body)
+        if norm is None:
+            return {"ignored": "edicao_sem_conteudo"}
+        body = {**body, "event": "messages.upsert", "data": norm}
     instancia = body.get("instance")
     data = body.get("data") or {}
     key = data.get("key") or {}
