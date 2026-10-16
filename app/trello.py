@@ -154,6 +154,10 @@ def plano(c: httpx.Client) -> list[dict]:
         if v["status_venda"] == "desistiu":
             destino = ESTOQUE if lista == VENDIDOS else None
         elif v.get("status_entrega") == "entregue":
+            if lista == VENDIDOS and v.get("finalizado_pelo_agente_em"):
+                # o agente já tinha finalizado e alguém tirou de lá: não foi entregue, reabre a venda
+                acoes.append({"venda": v, "card": card, "de": lista, "mudar": {}, "para": lista, "reabrir": True})
+                continue
             destino = FINALIZADO if lista in ANTES_DA_VENDA | {VENDIDOS} else None
         else:
             destino = VENDIDOS if lista in ANTES_DA_VENDA else None
@@ -189,6 +193,12 @@ def sincronizar(aplicar: bool = True) -> list[dict]:
                     card = c.post("/cards", params=a["criar"]).json()
                     db.update("vendas", {"trello_card_id": card["id"]}, {"id": f"eq.{a['venda']['id']}"})
                     continue
+                if a.get("reabrir"):
+                    db.update("vendas", {"status_entrega": "pendente", "data_entrega_real": None,
+                                         "finalizado_pelo_agente_em": None}, {"id": f"eq.{a['venda']['id']}"})
+                    db.update("entregas", {"status": "agendada", "entregue_em": None},
+                              {"venda_id": f"eq.{a['venda']['id']}", "status": "eq.entregue"})
+                    continue
                 if a.get("entregue_no_trello"):
                     db.update("vendas", {"status_entrega": "entregue",
                                          "data_entrega_real": a["venda"].get("data_entrega_real") or datas.hoje_iso()},
@@ -197,6 +207,9 @@ def sincronizar(aplicar: bool = True) -> list[dict]:
                               {"venda_id": f"eq.{a['venda']['id']}", "status": "eq.agendada"})
                 if a.get("mudar"):
                     c.put(f"/cards/{a['card']['id']}", params=a["mudar"]).raise_for_status()
+                    if a["para"] == FINALIZADO:
+                        db.update("vendas", {"finalizado_pelo_agente_em": datas.agora().isoformat()},
+                                  {"id": f"eq.{a['venda']['id']}"})
                 if a["venda"].get("trello_card_id") != a["card"]["id"]:
                     db.update("vendas", {"trello_card_id": a["card"]["id"]}, {"id": f"eq.{a['venda']['id']}"})
             sincronizar_checklists(c)
