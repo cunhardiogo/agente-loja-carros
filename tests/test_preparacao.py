@@ -77,3 +77,10 @@ def test_resumo_repostado_com_ok_da_baixa_linha_a_linha(monkeypatch):
     assert pg.eh_resumo_repostado(texto)
     assert pg.baixa_por_resumo(texto, datetime(2026, 10, 16, tzinfo=timezone.utc))["feitas"] == 2
     assert sorted(feitas) == ["1", "3"]
+
+
+def test_ok_so_com_separador_ou_check():
+    assert pg._OK_FIM.search("• Limpar caixa de roda (5 dias) - ok")
+    assert pg._OK_FIM.search("• Polir capo ✅")
+    assert not pg._OK_FIM.search("• Deixar pronto")
+    assert not pg._OK_FIM.search("• Preparar novamente (5 dias)")

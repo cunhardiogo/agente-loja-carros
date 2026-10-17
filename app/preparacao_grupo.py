@@ -55,7 +55,7 @@ def extrair(texto: str, imagem_b64: str | None = None, mime: str | None = None) 
 
 
 FOTO_MIN = 10
-_OK_FIM = re.compile(r"(?i)[\s\-–—:]*(ok|feito|feita|pronto|pronta|resolvido|✓|✅|✔️?)\s*$")
+_OK_FIM = re.compile(r"(?i)(\s*[-–—:]\s*(ok|feito|feita|pronto|pronta|resolvido)|\s*(✓|✅|✔️?))\s*$")
 
 
 def placa_norm_txt(texto: str | None) -> str | None:
@@ -192,7 +192,7 @@ def processar(data: dict, instancia: str, apikey: str, historico: bool = False) 
             itens = [it if it.get("carro") else {**it, "carro": da_foto} for it in itens]
     with trello._cliente() as c:
         cards, listas = trello.cartoes(c) if trello.configurado() else ([], {})
-        eh_lista = "miss" in _ascii(texto.splitlines()[0] if texto else "")
+        eh_lista = bool(re.search(r"\bmiss(ao|oes)\b", _ascii(texto.splitlines()[0] if texto else "")))
         vigentes = [r for it in itens
                     if (r := _aplicar(it, mid, em, autor, responsavel, historico, c, cards, listas, resumo, eh_lista))]
         if eh_lista and not historico:
@@ -278,8 +278,21 @@ def _edicao(pm: dict, data: dict) -> dict:
     alvo = (pm.get("key") or {}).get("id")
     texto = _texto(pm.get("editedMessage") or {})
     antigas = db.select_all("prep_tarefas", {"select": "*", "message_id": f"eq.{alvo}"}) if alvo else []
-    if not texto or not antigas:
-        return {"ignored": "edicao_sem_tarefas"}
+    if not texto or not alvo:
+        return {"ignored": "edicao_sem_texto"}
+    if not antigas:  # a mensagem original não tinha virado tarefa ("Fiesta" e depois editou com os itens): trata como nova
+        try:
+            itens = extrair(texto)
+        except Exception:
+            log.exception("falha extraindo edição da preparação")
+            return {"erro": "extracao"}
+        resumo = {"tarefas": 0, "feitas": 0, "problemas": 0}
+        with trello._cliente() as c:
+            cards, listas = trello.cartoes(c)
+            for it in itens:
+                _aplicar(it, alvo, _quando(data), _pessoa((data.get("key") or {}).get("participant"), data), None, False,
+                         c, cards, listas, resumo)
+        return resumo
     try:
         itens = extrair(texto)
     except Exception:

@@ -118,3 +118,12 @@ def test_quadro_sumiu_entregue_e_lista_parcial(monkeypatch):
     assert r["parcial"] and r["entregues"] == 0
     # lista antiga reentregue é ignorada
     assert eg.processar(_msg(LISTA, t0)) == {"ignored": "lista_antiga"}
+
+
+def test_entrega_nao_liga_venda_de_outro_vendedor(monkeypatch):
+    from app import entregas_grupo as eg
+    vendas = [{"id": "yan", "modelo": "Toyota", "versao": "Yaris hatch", "vendedor_id": "Y"}]
+    monkeypatch.setattr(eg.db, "select_all", lambda t, p=None: vendas)
+    assert eg._venda_do_item({"veiculo": "Yaris sedan"}, "CARLOS") is None   # Yaris do Carlos não cai na venda do Yan
+    assert eg._venda_do_item({"veiculo": "Yaris sedan"}, "Y")["id"] == "yan"
+    assert eg._venda_do_item({"veiculo": "Yaris sedan"}, None)["id"] == "yan"  # sem vendedor na lista: único que bate

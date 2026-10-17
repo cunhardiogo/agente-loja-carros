@@ -4,7 +4,7 @@ mensagem fica pendente até o "ok" (acoes._pedir)."""
 import re
 from datetime import datetime, timezone
 
-from . import db, trello
+from . import datas, db, trello
 from .acoes import _alterar, _bate, _criado, _lista, _marcar_sujo, _pedir, _unico
 from .leads import _ascii, _iso
 
@@ -78,7 +78,7 @@ def criar_entrega(carro: str, vendedor: str | None = None, data: str | None = No
     row = {"veiculo": carro, "placa": vendas_grupo.placa_norm(placa), "vendedor_id": (vend or {}).get("id"),
            "vendedor_nome": (vend or {}).get("nome") or vendedor, "horario": horario, "observacao": observacao,
            "data_texto": data, "origem": "planilha", "status": "agendada", "historico": False,
-           "data_entrega": entregas_grupo._data_entrega(data, datetime.now().date()) if data else None}
+           "data_entrega": entregas_grupo._data_entrega(data, datas.hoje()) if data else None}
     e = db.insert("entregas", row)
     _criado("entregas", e, f"criar entrega {carro}")
     entregas_grupo.sujo["v"] = True

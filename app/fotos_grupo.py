@@ -163,7 +163,8 @@ def processar(data: dict, instancia: str, apikey: str, aplicar: bool = True) -> 
     if "novidade" in a:  # carros novos chegando: cartão em "Carro em trânsito"
         _ultima_novidade[autor] = quando
         return novidades(texto, key.get("id")) if aplicar else {"novidades": texto[:60]}
-    if texto and not autor_caio and len(texto) > 15 and quando - _ultima_novidade.get(autor, 0) <= NOVIDADE_MIN * 60:
+    if texto and not autor_caio and len(texto) > 15 and "pront" not in a \
+            and quando - _ultima_novidade.get(autor, 0) <= NOVIDADE_MIN * 60:
         return novidades(texto, key.get("id")) if aplicar else {"novidades": texto[:60]}  # carros logo depois do cabeçalho
     if "pront" in a and not autor_caio:
         _ultimo_pronto[autor] = quando

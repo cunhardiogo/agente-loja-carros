@@ -205,9 +205,10 @@ def sincronizar(aplicar: bool = True) -> list[dict]:
                     db.update("entregas", {"status": "agendada", "entregue_em": None},
                               {"venda_id": f"eq.{a['venda']['id']}", "status": "eq.entregue"})
                     continue
-                if a.get("entregue_no_trello"):
+                if a.get("entregue_no_trello"):  # alguém finalizou à mão: se tirar de lá depois, reabre também
                     db.update("vendas", {"status_entrega": "entregue",
-                                         "data_entrega_real": a["venda"].get("data_entrega_real") or datas.hoje_iso()},
+                                         "data_entrega_real": a["venda"].get("data_entrega_real") or datas.hoje_iso(),
+                                         "finalizado_pelo_agente_em": datas.agora().isoformat()},
                               {"id": f"eq.{a['venda']['id']}"})
                     db.update("entregas", {"status": "entregue", "entregue_em": datas.agora().isoformat()},
                               {"venda_id": f"eq.{a['venda']['id']}", "status": "eq.agendada"})

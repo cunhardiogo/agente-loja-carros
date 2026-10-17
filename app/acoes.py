@@ -6,7 +6,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 
-from . import db, trello
+from . import datas, db, trello
 from .config import settings
 from .leads import _ascii, _iso
 
@@ -79,7 +79,7 @@ def corrigir_entrega(termo: str, data: str | None = None, horario: str | None = 
         return err
     upd = {}
     if data:
-        d = entregas_grupo._data_entrega(data, datetime.now().date())
+        d = entregas_grupo._data_entrega(data, datas.hoje())
         upd.update({"data_entrega": d, "data_texto": data})
     if horario:
         upd["horario"] = horario

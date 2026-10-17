@@ -115,9 +115,9 @@ def _venda_do_item(item: dict, vend_id: str | None) -> dict | None:
                                     "status_venda": "in.(completa,aguardando_resumo)",
                                     "status_entrega": "neq.entregue", "order": "created_at.desc"})
     cands = [v for v in rows if chave in _ascii(f"{v.get('modelo')} {v.get('versao')} {nome_carro(v)}")]
-    do_vendedor = [v for v in cands if vend_id and v.get("vendedor_id") == vend_id]
-    if do_vendedor:
-        return do_vendedor[0]
+    if vend_id:  # vendedor conhecido: só a venda dele (o Yaris do Carlos não pode cair na venda do Yan)
+        do_vendedor = [v for v in cands if v.get("vendedor_id") == vend_id]
+        return do_vendedor[0] if len(do_vendedor) == 1 else None
     return cands[0] if len(cands) == 1 else None
 
 

@@ -398,14 +398,17 @@ def _edicao_normalizada(body: dict) -> dict | None:
 
 def _rotear_evento(body: dict) -> dict:
     sec = ((body.get("data") or {}).get("message") or {}).get("secretEncryptedMessage")
-    if sec and sec.get("secretEncType") == 2:  # edição criptografada: decifra e trata como edição normal
+    if sec and sec.get("secretEncType") == 2 and body.get("instance") == settings.evolution_instance:
+        # edição criptografada nos grupos/conversas monitorados: decifra e trata como edição normal
         from . import edicoes
         norm = edicoes.como_edicao(body["data"])
         if norm:
             body = {**body, "data": norm}
         else:
-            try:  # guarda o caso que falhou pra conferir o formato
-                db.insert("webhook_amostras", {"evento": "edicao_nao_decifrada", "corpo": body})
+            try:  # guarda o caso que falhou pra conferir o formato (no máximo 30)
+                if len(db.select("webhook_amostras", {"select": "id", "evento": "eq.edicao_nao_decifrada",
+                                                      "limit": "30"})) < 30:
+                    db.insert("webhook_amostras", {"evento": "edicao_nao_decifrada", "corpo": body})
             except Exception:
                 log.exception("falha guardando amostra")
     if (body.get("event") or "").lower().replace("_", ".") == "messages.edited":
