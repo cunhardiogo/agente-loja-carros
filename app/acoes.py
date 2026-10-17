@@ -265,6 +265,10 @@ def _executar(a: dict) -> None:
                 trello.remover_item(c, t["card_id"], t["checklist_item_id"])
         db.delete("prep_tarefas", {"id": f"eq.{t['id']}"})
         return
+    if a["tipo"] == "entregue":
+        from .consulta import aplicar_entregue
+        aplicar_entregue(p["ids"], p["entregue"])
+        return
     if a["tipo"] == "apagar":
         from .controle import executar_apagar
         executar_apagar(p)

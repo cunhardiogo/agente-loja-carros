@@ -1,4 +1,5 @@
 import json
+import re
 import logging
 from datetime import datetime, timedelta
 
@@ -303,10 +304,21 @@ def marcar_venda_caiu(termo: str) -> dict:
 
 def buscar_venda(termo: str) -> dict:
     """Uma venda por carro, placa ou cliente, com pagamentos (comprovantes) e documentos recebidos."""
-    t = db.ilike(termo)
-    rows = db.select("vendas", {"select": "*", "removido": "eq.false", "order": "created_at.desc", "limit": "8",
-                                "or": f"(modelo.{t},versao.{t},placa.{t},cliente_nome.{t})"})
+    from .leads import _ascii
     nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
+    palavras = [p for p in re.split(r"[^a-z0-9]+", _ascii(termo).replace("-", "")) if len(p) >= 2
+                and p not in {"do", "da", "de", "dos", "das", "que", "venda", "vendeu", "carro", "resumo"}]
+    todas = db.select_all("vendas", {"select": "*", "removido": "eq.false", "order": "created_at.desc"})
+
+    def campos(r):
+        return _ascii(" ".join(str(r.get(k) or "") for k in ("modelo", "versao", "ano", "placa", "cliente_nome"))
+                      + " " + nomes.get(r.get("vendedor_id"), "")).replace("-", "")
+    rows = [r for r in todas if palavras and all(p in campos(r) for p in palavras)]
+    if not rows and palavras:  # nenhuma com tudo: as que batem com mais palavras (placa sozinha já resolve)
+        pontos = [(sum(p in campos(r) for p in palavras), r) for r in todas]
+        melhor = max((n for n, _ in pontos), default=0)
+        rows = [r for n, r in pontos if melhor and n == melhor]
+    rows = rows[:8]
     out = []
     for r in rows:
         pags = db.select("pagamentos", {"select": "valor,pago_em,tipo,banco,id_transacao", "venda_id": f"eq.{r['id']}"})
@@ -344,9 +356,18 @@ def reservados(periodo: str = "mes") -> dict:
     return {"periodo": periodo, "quantidade": len(rows), "itens": rows}
 
 
-def entregas_agendadas(periodo: str = "mes") -> dict:
-    """Quadro do grupo de entregas: o que ainda não foi entregue (com data no período) e as sem data."""
-    ini, fim = _range_futuro(periodo)  # entregas são futuras: olha pra frente
+def entregas_agendadas(periodo: str = "mes", data: str | None = None) -> dict:
+    """Quadro do grupo de entregas: o que ainda não foi entregue (com data no período) e as sem data.
+    periodo: hoje, amanha, semana, mes; ou data (AAAA-MM-DD ou dd/mm) para um dia específico."""
+    hoje = datas.hoje()
+    if data:
+        from .leads import _data
+        d = _data(data, hoje) if "/" in data else datetime.fromisoformat(data[:10]).date()
+        ini = fim = d.isoformat()
+    elif (periodo or "").lower() in ("amanha", "amanhã"):
+        ini = fim = (hoje + timedelta(days=1)).isoformat()
+    else:
+        ini, fim = _range_futuro(periodo)  # entregas são futuras: olha pra frente
     rows = db.select_all("entregas", {
         "select": "veiculo,data_entrega,data_texto,horario,vendedor_nome,observacao,status",
         "origem": "in.(grupo,planilha)", "status": "eq.agendada", "removido": "eq.false",
@@ -355,7 +376,7 @@ def entregas_agendadas(periodo: str = "mes") -> dict:
     com_data = [r for r in rows if r.get("data_entrega") and _dentro(r["data_entrega"], ini, fim)]
     atrasadas = [r for r in rows if r.get("data_entrega") and r["data_entrega"] < datas.hoje_iso()]
     sem_data = [r for r in rows if not r.get("data_entrega")]
-    return {"periodo": periodo, "quantidade": len(com_data), "entregas": com_data,
+    return {"de": ini, "ate": fim, "hoje_e": hoje.isoformat(), "quantidade": len(com_data), "entregas": com_data,
             "atrasadas_ainda_no_quadro": atrasadas, "sem_data": sem_data}
 
 
@@ -413,24 +434,52 @@ def _venda_unica(rows, cliente, veiculo, descricao):
     return m[0], None
 
 
-def marcar_entregue(cliente: str | None = None, veiculo: str | None = None) -> dict:
-    rows = [r for r in db.select_all("vendas", {"select": "id,cliente_nome,modelo,versao,status_entrega,"
-                                                "valor_total,valor_venda,valor_entrada"})
-            if r.get("status_entrega") != "entregue"]
-    r, err = _venda_unica(rows, cliente, veiculo, "venda pendente")
-    if err:
-        return err
-    from . import datas
-    dados = {"status_entrega": "entregue", "data_entrega_real": datas.hoje_iso()}
-    saldo = (r.get("valor_total") or r.get("valor_venda") or 0) - (r.get("valor_entrada") or 0)
-    if saldo <= 0:  # só quita automático se não há saldo a receber (I3)
-        dados["status_pagamento"] = "pago"
-    db.update("vendas", dados, {"id": f"eq.{r['id']}"})
-    msg = f"{r['cliente_nome']} — {r.get('modelo', '')} {r.get('versao', '') or ''}".strip()
-    if saldo > 0:
-        return {"ok": True, "entregue": msg, "atencao": f"ainda há R$ {saldo:.0f} a receber — não marquei como pago"}
-    return {"ok": True, "entregue": msg}
+def marcar_entregue(veiculos: list[str] | None = None, entregue: bool = True, cliente: str | None = None,
+                    veiculo: str | None = None) -> dict:
+    """Entregue (ou não entregue, entregue=False) de um ou mais carros — sempre pede o ok do dono mostrando quais."""
+    from . import acoes, vendas_grupo
+    termos = list(veiculos or []) + [x for x in (veiculo, cliente) if x and not veiculos]
+    if not termos:
+        return {"erro": "qual carro?"}
+    nomes = {v["id"]: v["nome"] for v in db.select("vendedores", {"select": "id,nome"})}
+    vendas = [r for r in db.select_all("vendas", {"select": "*", "removido": "eq.false",
+                                                  "status_venda": "in.(completa,aguardando_resumo)"})
+              if (r.get("status_entrega") != "entregue") == entregue]
+    achadas = []
+    for t in termos:
+        cands = [r for r in vendas if acoes._bate(t, r.get("modelo"), r.get("versao"), r.get("ano"), r.get("placa"),
+                                                  r.get("cliente_nome"), nomes.get(r.get("vendedor_id")))]
+        if len(cands) != 1:
+            situacao = "a entregar" if entregue else "já entregue"
+            return {"erro": f"'{t}': " + ("não achei venda " + situacao if not cands else
+                                         f"{len(cands)} vendas batem: " + "; ".join(
+                                             f"{vendas_grupo._carro(r)} ({nomes.get(r.get('vendedor_id'), '?')})"
+                                             for r in cands[:5]))}
+        achadas.append(cands[0])
+    lista = "; ".join(f"{vendas_grupo._carro(r)} ({nomes.get(r.get('vendedor_id'), '?')})" for r in achadas)
+    return acoes._pedir("entregue", {"ids": [r["id"] for r in achadas], "entregue": entregue},
+                        f"marcar como {'ENTREGUE' if entregue else 'NÃO entregue (volta pra Vendidos)'}: {lista}")
 
+
+def aplicar_entregue(ids: list[str], entregue: bool) -> None:
+    from . import acoes, entregas_grupo, trello, vendas_grupo
+    for vid in ids:
+        r = db.select("vendas", {"select": "*", "id": f"eq.{vid}"})[0]
+        if entregue:
+            upd = {"status_entrega": "entregue", "data_entrega_real": datas.hoje_iso()}
+            db.update("entregas", {"status": "entregue", "entregue_em": datas.agora().isoformat()},
+                      {"venda_id": f"eq.{vid}", "status": "eq.agendada"})
+        else:
+            upd = {"status_entrega": "pendente", "data_entrega_real": None, "finalizado_pelo_agente_em": None}
+            db.update("entregas", {"status": "agendada", "entregue_em": None},
+                      {"venda_id": f"eq.{vid}", "status": "eq.entregue"})
+            if r.get("trello_card_id") and trello.configurado():
+                with trello._cliente() as c:
+                    _, listas = trello.cartoes(c)
+                    vend = next(k for k, v in listas.items() if v == trello.VENDIDOS)
+                    c.put(f"/cards/{r['trello_card_id']}", params={"idList": vend, "pos": "top"}).raise_for_status()
+        acoes._alterar("vendas", r, upd, f"{'entregue' if entregue else 'NÃO entregue'}: {vendas_grupo._carro(r)}")
+    vendas_grupo.sujo["v"] = entregas_grupo.sujo["v"] = True
 
 def marcar_pago(cliente: str | None = None, veiculo: str | None = None) -> dict:
     rows = [r for r in db.select_all("vendas", {"select": "id,cliente_nome,modelo,versao,status_pagamento"})
@@ -1104,23 +1153,6 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {"periodo": _PERIODO, "data_inicio": _DI, "data_fim": _DF}},
     }},
     {"type": "function", "function": {
-        "name": "listar_pendencias",
-        "description": "Lista os eventos aguardando confirmação (fila de pendências), com o código de cada um.",
-        "parameters": {"type": "object", "properties": {}},
-    }},
-    {"type": "function", "function": {
-        "name": "radar",
-        "description": "Mostra os alertas abertos do supervisor (carro encalhado, a receber parado, entrega atrasada, "
-                       "comparecimento baixo, sistema fora, etc.). Use quando perguntarem 'o que preciso resolver?', "
-                       "'tem algum alerta?', 'como está a operação?'.",
-        "parameters": {"type": "object", "properties": {}},
-    }},
-    {"type": "function", "function": {
-        "name": "resolver_alerta",
-        "description": "Marca um alerta do radar como resolvido. Passe um trecho do título do alerta.",
-        "parameters": {"type": "object", "properties": {"termo": {"type": "string"}}, "required": ["termo"]},
-    }},
-    {"type": "function", "function": {
         "name": "anotar",
         "description": "Salva uma anotação livre do dono (ex: 'anota pra ligar pro fornecedor', 'lembra de cobrar o Carlos'). "
                        "Diferente de lembrete: não tem horário, fica numa lista de pendências pessoais.",
@@ -1142,21 +1174,12 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {"periodo": _PERIODO, "data_inicio": _DI, "data_fim": _DF}},
     }},
     {"type": "function", "function": {
-        "name": "reservados",
-        "description": "Quantos carros estão RESERVADOS no período (planilha, Status=Reservado).",
-        "parameters": {"type": "object", "properties": {"periodo": _PERIODO}},
-    }},
-    {"type": "function", "function": {
         "name": "marcar_entregue",
-        "description": "AÇÃO: marcar uma venda como entregue (e paga). Use quando o dono disser que entregou um carro.",
+        "description": "AÇÃO: marcar carro(s) como ENTREGUE, ou desfazer (entregue=false) quando o dono disser que NÃO foi entregue / ainda está nos vendidos. Passe todos os carros numa chamada só. Pede o ok do dono mostrando quais carros — só chame quando souber QUAIS são; se não, pergunte antes.",
         "parameters": {"type": "object", "properties": {
-            "cliente": {"type": "string"}, "veiculo": {"type": "string"}}},
-    }},
-    {"type": "function", "function": {
-        "name": "marcar_pago",
-        "description": "AÇÃO: marcar uma venda como paga/recebida. Use quando o dono disser que recebeu o pagamento.",
-        "parameters": {"type": "object", "properties": {
-            "cliente": {"type": "string"}, "veiculo": {"type": "string"}}},
+            "veiculos": {"type": "array", "items": {"type": "string"}, "description": "um item por carro: modelo, placa e/ou vendedor (ex. 'City do Yan', 'WR-V RKG-3F82')"},
+            "entregue": {"type": "boolean", "description": "true = entregue (padrão); false = não foi entregue"}},
+            "required": ["veiculos"]},
     }},
     {"type": "function", "function": {
         "name": "atualizar_venda",
@@ -1186,69 +1209,15 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {}},
     }},
     {"type": "function", "function": {
-        "name": "resumo_vendas",
-        "description": "Faturamento, qtd, ticket médio e over total num período. Pode filtrar por vendedor.",
-        "parameters": {"type": "object", "properties": {
-            "periodo": _PERIODO, "vendedor": {"type": "string", "description": "Nome do vendedor (opcional)"},
-            "data_inicio": _DI, "data_fim": _DF}},
-    }},
-    {"type": "function", "function": {
-        "name": "ranking_vendedores",
-        "description": "Ranking dos vendedores por valor vendido num período.",
-        "parameters": {"type": "object", "properties": {"periodo": _PERIODO, "data_inicio": _DI, "data_fim": _DF}},
-    }},
-    {"type": "function", "function": {
-        "name": "vendas_por_canal",
-        "description": "Vendas agrupadas por canal/portal (Webmotors, OLX, Instagram, Indicação...). Qual canal vende mais.",
-        "parameters": {"type": "object", "properties": {"periodo": _PERIODO, "data_inicio": _DI, "data_fim": _DF}},
-    }},
-    {"type": "function", "function": {
-        "name": "margem_avaliacoes",
-        "description": "Avaliações no período: FIPE x valor avaliado x valor que o cliente pediu, e média de quanto abaixo da FIPE compramos.",
-        "parameters": {"type": "object", "properties": {"periodo": _PERIODO, "data_inicio": _DI, "data_fim": _DF}},
-    }},
-    {"type": "function", "function": {
-        "name": "conversao",
-        "description": "Taxa de conversão: dos agendamentos no período, quantos viraram venda (%).",
-        "parameters": {"type": "object", "properties": {"periodo": _PERIODO, "data_inicio": _DI, "data_fim": _DF}},
-    }},
-    {"type": "function", "function": {
-        "name": "historico_cliente",
-        "description": "Histórico de um cliente: agendamentos (com resultado) e vendas dele. Use p/ 'histórico do cliente X'.",
-        "parameters": {"type": "object", "properties": {"nome": {"type": "string"}}, "required": ["nome"]},
-    }},
-    {"type": "function", "function": {
-        "name": "pendencias",
-        "description": "Carros/vendas pendentes: 'pagamento' (a receber) ou 'entrega' (a entregar).",
-        "parameters": {"type": "object", "properties": {
-            "tipo": {"type": "string", "enum": ["pagamento", "entrega"]}}, "required": ["tipo"]},
-    }},
-    {"type": "function", "function": {
-        "name": "resumo_agendamentos",
-        "description": "RESUMO de agendamentos num período: total e taxa de comparecimento (quantos vieram/faltaram).",
-        "parameters": {"type": "object", "properties": {
-            "periodo": _PERIODO, "compareceu": {"type": "boolean"}, "data_inicio": _DI, "data_fim": _DF}},
-    }},
-    {"type": "function", "function": {
-        "name": "listar_agendamentos",
-        "description": "LISTA detalhada dos agendamentos (cliente, horário, vendedor, status). Use para 'quais os agendamentos de hoje/amanhã/essa semana'.",
-        "parameters": {"type": "object", "properties": {
-            "periodo": {"type": "string", "enum": ["hoje", "amanha", "semana", "mes"]}}},
-    }},
-    {"type": "function", "function": {
         "name": "entregas_agendadas",
-        "description": "Entregas agendadas (lista do grupo de entregas) num período, com veículo, horário e vendedor.",
-        "parameters": {"type": "object", "properties": {"periodo": _PERIODO}},
+        "description": "Entregas do quadro do grupo de entregas: as do dia/período pedido, as atrasadas e as sem data. Para 'amanhã' use periodo='amanha'; para um dia específico use data.",
+        "parameters": {"type": "object", "properties": {"periodo": {"type": "string", "enum": ["hoje", "amanha", "semana", "mes"]},
+                                                         "data": {"type": "string", "description": "dia específico: AAAA-MM-DD ou dd/mm"}}},
     }},
     {"type": "function", "function": {
         "name": "listar_avaliacoes",
         "description": "Avaliações de carros (troca) num período, com FIPE e valor avaliado.",
         "parameters": {"type": "object", "properties": {"periodo": _PERIODO}},
-    }},
-    {"type": "function", "function": {
-        "name": "lista_ligar_hoje",
-        "description": "Lista de clientes pra contatar hoje (faltas de ontem, reservas paradas, entregas atrasadas, a receber), com telefone e o motivo. Você liga — o agente só organiza.",
-        "parameters": {"type": "object", "properties": {}},
     }},
     {"type": "function", "function": {
         "name": "mensagem_cobranca",
@@ -1288,34 +1257,40 @@ TOOLS = [
     }},
 ]
 
-SYSTEM = """Você é o assistente da Loja SB (revenda de carros) respondendo o DONO no WhatsApp.
-Use SEMPRE as ferramentas para buscar dados reais — nunca invente números.
+SYSTEM = """Você é o assistente do Diogo, dono do Grupo SB (Brutus e Soberano, revenda de carros no Rio). Conversa pelo WhatsApp.
+Tudo o que acontece nos grupos da loja (agendamento, vendas, entregas, preparação, fotos, avaliações, recall) já está no sistema; você consulta e altera pelas ferramentas.
 
-CONTAGEM x VALOR: para CONTAR vendidos use 'vendidos' (fonte oficial = grupo de VENDAS; a venda conta no aviso "vendido", o Resumo de Venda é pendência). Para FATURAMENTO/ticket/over use 'resumo_vendas'.
-SEMPRE que falar de vendas/faturamento/financeiro, informe os DOIS juntos: FATURAMENTO (resumo_vendas) E A RECEBER (a_receber_vendas). Para 'quanto falta receber' use SEMPRE a_receber_vendas.
+REGRAS QUE NUNCA QUEBRAM
+1. Número, nome, data e status só saem de ferramenta. Se a ferramenta não trouxe, diga que não encontrou — nunca complete de cabeça nem deduza de outro campo (ex.: "entrega prevista" não é "vai entregar hoje").
+2. Só diga que fez algo se a ferramenta devolveu ok. Se deu erro, ou não existe ferramenta pra isso, diga exatamente isso. Nunca escreva "corrigido", "marquei", "atualizei" sem a chamada ter dado certo NESTA resposta.
+3. Ações que pedem o ok do dono (marcar_entregue, apagar, mover_cartao, criar_cartao, enviar_mensagem, remover tarefa): chame direto com a interpretação mais provável — o pedido de ok já mostra exatamente quais carros/registros e serve de pergunta. As OUTRAS ações (corrigir, lançar, atualizar), se o pedido for ambíguo ("os dois" e a conversa citou três; "esse" podendo ser mais de um; nome com vários registros), NÃO chame: pergunte antes, listando as opções.
+4. Correção do dono ("não, o WR-V não", "errei, é o City") → desfaça o que foi feito errado E aplique o certo, cada um com a sua ferramenta, e diga o resultado de cada um.
+5. Ferramenta que devolve precisa_confirmar: diga o que vai acontecer e peça "ok" ou "não". Ainda não fez.
 
-PERÍODOS: quando o usuário não disser, assuma o mês atual. Para períodos livres ("semana passada", "dia 5", "em maio", "últimos 7 dias"), \
-calcule data_inicio/data_fim em ISO a partir da DATA DE HOJE informada e passe nas ferramentas que aceitam (vendidos, resumo_vendas, ranking_vendedores, vendas_por_canal, margem_avaliacoes, conversao, resumo_agendamentos).
+DATAS
+Hoje está no fim destas instruções. "Amanhã" = hoje + 1 dia; "sexta" = a próxima sexta. Sempre escreva a data por extenso na resposta (ex.: "amanhã, 18/10"). Sem período dito, use o mês atual.
 
-ANÁLISES: você tem vendas_por_canal (qual portal vende mais), margem_avaliacoes (FIPE x avaliado), conversao (agendou→vendeu %), historico_cliente (jornada de um cliente).
+QUAL FERRAMENTA USAR
+- Números do negócio (vendas do mês, faturamento, ticket, por vendedor, por canal, conversão, comparecimento, tempo de retorno, entregas no prazo, estoque parado, dias na pintura, avaliações, recall, funil, comparar meses): metricas.
+- Quais carros foram vendidos (lista): vendidos. Uma venda específica, com resumo e comprovantes: buscar_venda (aceita carro, placa, cliente ou vendedor). Venda sem resumo/incompleta/reserva: vendas_pendentes. Quanto falta receber: a_receber_vendas.
+- Leads e agendamentos: leads_abertos, buscar_lead, resumo_leads.
+- Entregas: entregas_agendadas (periodo hoje/amanha/semana ou data específica).
+- Onde o carro está e o que falta nele: consultar_trello. Preço e dias de estoque: estoque_precos.
+- Preparação em aberto: preparacao_aberta. Recall: listar_recalls. Avaliações: listar_avaliacoes.
+- Quem falou o quê, ou qualquer coisa que não esteja nas outras: buscar_mensagens ("o Felipe me falou" = conversa privada com ele).
 
-AÇÕES quando o dono pedir: marcar_entregue, marcar_pago, marcar_anunciado, e EDITAR registros: atualizar_venda \
-(corrigir canal/valor/vendedor/pagamento/datas/cliente de uma venda — ex 'a venda do Denilson foi pelo tráfego', 'a do João foi 95 mil') \
-e atualizar_carro (preço/status/cor/km do estoque). Confirme em 1 linha o que mudou (ou que não encontrou). Nunca invente se a ferramenta der erro. \
-LEMBRETES: criar_lembrete quando o dono pedir p/ ser lembrado (calcule 'quando' em ISO a partir da DATA DE HOJE); listar_lembretes p/ ver os pendentes.
-SUPERVISOR: você é proativo. radar mostra os alertas abertos (carro encalhado, a receber parado, entrega atrasada, comparecimento baixo, sistema fora) — use quando perguntarem 'o que preciso resolver?'/'como está a operação?', e resolver_alerta p/ baixar um. anotar salva recado livre sem horário; listar_notas/resolver_nota gerenciam. pendências (listar_pendencias) mostra o que aguarda sua confirmação.
-SECRETÁRIA (assistido — você organiza, o DONO contata): lista_ligar_hoje dá quem ligar hoje (faltas de ontem, reservas paradas, entrega atrasada, a receber) com telefone — use em 'quem preciso contatar?'/'tem alguém pra ligar?'. mensagem_cobranca monta um texto pronto e educado de cobrança pra um cliente com saldo (ex 'manda uma cobrança pro João'); ENTREGUE o texto pro dono copiar/encaminhar e deixe claro que ele revisa e envia — você NUNCA manda direto pro cliente.
-LEADS (grupo Agendamento SDR — fonte oficial de visitas e negociações por telefone): use leads_abertos, buscar_lead e resumo_leads para qualquer pergunta sobre agendamentos, leads, SDRs, retorno de vendedor e cobranças. Tipos: Visita (horário na loja), Negociação telefone, Turno (horário e vendedor definidos).
-KPIs, taxas, tempos médios, placar, funil e comparação entre períodos: use SEMPRE a ferramenta metricas (é a fonte oficial dos números do painel).
-BUSCA: para qualquer coisa que não esteja nas outras ferramentas, ou para saber quem falou o quê, use buscar_mensagens. ESTOQUE = Trello (consultar_trello: onde está, checklist); PREÇO e dias de estoque = estoque_precos (Autocerto).
-LANÇAR/APAGAR: criar_venda, criar_lead, criar_entrega, registrar_pagamento, criar_avaliacao, apagar (pede ok). 'desfaz' → desfazer. Liga/desliga: automacoes/automacao. Mandar mensagem como o dono: enviar_mensagem (pede ok).
-CORREÇÕES PELO DONO: corrigir_recall, corrigir_lead, corrigir_entrega, valor_avaliacao, placa_venda, tarefa_preparacao (adicionar/concluir/remover), mover_cartao, criar_cartao, atualizar_venda, marcar_venda_caiu. Planilha e descrição do grupo se atualizam sozinhas. Quando a ferramenta devolver precisa_confirmar, diga ao dono exatamente o que vai ser feito e peça "ok" ou "não" — não diga que já fez. Se achar mais de um registro, mostre as opções e pergunte qual.
-COBRANÇAS A VENDEDORES: o agente ENVIA sim, pelo número do dono, depois da aprovação. Se o dono pedir para mandar mensagem/cobrança a um vendedor, NÃO diga que não envia: explique que basta responder à cobrança pendente com 'ok CÓDIGO', 'não CÓDIGO' ou 'texto novo: <mensagem>'.
-VENDAS do grupo: vendas_pendentes (sem resumo, resumo incompleto, reservas) e buscar_venda (detalhe de uma venda com comprovantes de pagamento).
+AÇÕES (sempre com a ferramenta; confirme em 1 linha o que mudou)
+- Entregou / não entregou: marcar_entregue (entregue=false desfaz). Caiu a venda: marcar_venda_caiu.
+- Corrigir: atualizar_venda, placa_venda, corrigir_lead, corrigir_entrega, valor_avaliacao, corrigir_recall, tarefa_preparacao.
+- Lançar: criar_venda, criar_lead, criar_entrega, registrar_pagamento, criar_avaliacao. Apagar: apagar (pede ok). Desfazer a última: desfazer.
+- Trello: mover_cartao, criar_cartao, renomear_cartao, prazo_cartao.
+- Mandar mensagem pelo número do Diogo pra alguém da equipe ou grupo: enviar_mensagem (pede ok). Cobrança pendente se aprova respondendo "ok CÓDIGO".
+- Automações: automacoes / automacao. Lembrete: criar_lembrete. Anotação: anotar.
 
-ESTILO: curto e direto, em português, valores como R$ 95.000, listas em linhas curtas com emojis discretos. \
-Quando fizer sentido, acrescente UM insight curto (ex.: quem está puxando o mês, alerta de comparecimento/entrega atrasada) — sem encher. \
-Use o histórico da conversa para entender perguntas curtas de continuação ("e do Carlos?", "e esse mês?")."""
+COMO RESPONDER
+Curto e direto, como alguém da equipe falaria. Valores em reais sem centavos (R$ 745.303). Lista só quando houver vários itens, uma linha por item.
+Termine quando a informação acabar: NUNCA feche com "se quiser…", "qualquer coisa me avisa", "só avisar" ou oferecendo ajuda. Não dê palpite/insight sem ser perguntado.
+Pergunta curta de continuação ("e do Carlos?", "e amanhã?") usa o contexto da conversa."""
 
 
 def _system_dinamico() -> str:
