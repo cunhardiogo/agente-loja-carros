@@ -50,16 +50,17 @@ def processar(row: dict) -> None:
 
 
 def comparar(ini: str, fim: str, leads_rows: list[dict]) -> list[dict]:
-    """O que cada SDR reportou x o que o grupo de agendamento registrou (agendamentos por SDR)."""
+    """O que cada SDR reportou x o que ela lançou no grupo de agendamento (agendamentos ~ visitas, negociação ~ telefone)."""
     rel = db.select_all("sdr_produtividade", {"select": "*", "data": f"gte.{ini}", "and": f"(data.lte.{fim})"})
     out = {}
     for r in rel:
         s = out.setdefault(_ascii(r["sdr"]), {"sdr": r["sdr"], "dias_reportados": 0, "leads": 0, "agendamentos": 0,
-                                              "negociacao": 0, "vendas": 0, "formularios_no_grupo_agendamento": 0})
+                                              "negociacao": 0, "vendas": 0, "no_grupo_agendamento": {"visitas": 0, "negociacao_telefone": 0}})
         s["dias_reportados"] += 1
         for c in _CAMPOS:
             s[c] += r.get(c) or 0
     for lead in leads_rows:
-        if lead.get("sdr") and _ascii(lead["sdr"]) in out:
-            out[_ascii(lead["sdr"])]["formularios_no_grupo_agendamento"] += 1
+        g = out.get(_ascii(lead.get("sdr") or ""), {}).get("no_grupo_agendamento")
+        if g is not None and lead.get("tipo") in ("visita", "negociacao_telefone"):
+            g["visitas" if lead["tipo"] == "visita" else "negociacao_telefone"] += 1
     return sorted(out.values(), key=lambda s: -s["agendamentos"])
