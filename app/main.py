@@ -7,7 +7,7 @@ from datetime import timedelta
 from fastapi import BackgroundTasks, FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from . import (acoes, arquivo, avaliacoes_grupo, flags, saude, recall_grupo, cobrancas, confirmacao, consulta, entregas_grupo, fotos_grupo, preparacao_grupo, trello, datas, db, evolution, ingest, leads, media, meta_ads, planilha, sheets,
+from . import (acoes, arquivo, sdrs_grupo, avaliacoes_grupo, flags, saude, recall_grupo, cobrancas, confirmacao, consulta, entregas_grupo, fotos_grupo, preparacao_grupo, trello, datas, db, evolution, ingest, leads, media, meta_ads, planilha, sheets,
                supervisor, vendas_grupo)
 from .config import settings
 
@@ -429,7 +429,9 @@ def _rotear_evento(body: dict) -> dict:
     if not eh_assistente and (body.get("event") or "").lower().replace("_", ".") in ("messages.upsert", ""):
         monitorado = ingest.grupo_por_jid(jid)
         if monitorado:  # arquivo pra busca do dono — antes de qualquer tratamento
-            arquivo.arquivar(data, monitorado.get("nome"))
+            row = arquivo.arquivar(data, monitorado.get("nome"))
+            if row and jid == sdrs_grupo.GRUPO:  # relatório de produtividade das SDRs
+                sdrs_grupo.processar(row)
             if monitorado.get("tipo") == "arquivo":  # grupo só guardado (ex.: Gerência), sem extração
                 return {"arquivado": message_id}
 

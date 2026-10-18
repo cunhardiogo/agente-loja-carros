@@ -203,6 +203,15 @@ def vendas(ini: str, fim: str) -> dict:
     }
 
 
+def _sdr_reportado(ini, fim, rows) -> list | dict:
+    """Relatório diário de produtividade de cada SDR (grupo Sdr's) x formulários dela no grupo de agendamento."""
+    from . import sdrs_grupo
+    try:
+        return sdrs_grupo.comparar(ini, fim, rows)
+    except Exception as e:
+        return {"erro": str(e)}
+
+
 # ===== leads (agendamento) =====
 def leads(ini: str, fim: str) -> dict:
     from .leads import STATUS_LABEL, TIPO_LABEL
@@ -241,6 +250,7 @@ def leads(ini: str, fim: str) -> dict:
         "por_canal": {c: {"leads": a, "vendidos": b, "conversao_pct": _pct(b, a)} for c, (a, b) in
                       sorted(por_canal_conv.items(), key=lambda kv: -kv[1][0])},
         "por_sdr": dict(Counter(l.get("sdr") or "?" for l in rows)),
+        "sdr_reportado": _sdr_reportado(ini, fim, rows),
         "por_status": dict(Counter(STATUS_LABEL.get(l["status"], l["status"]) for l in rows)),
         "por_vendedor": dict(sorted(por_vend.items(), key=lambda kv: -kv[1]["leads"])),
         "convertidos": len(convertidos), "conversao_pct": _pct(len(convertidos), len(rows)),

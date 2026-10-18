@@ -52,11 +52,12 @@ def linha(data: dict, conversa: str | None) -> dict | None:
             "citada": _stanza(data), "em": _iso(_quando(data))}
 
 
-def arquivar(data: dict, conversa: str | None) -> None:
+def arquivar(data: dict, conversa: str | None) -> dict | None:
     try:
         row = linha(data, conversa)
         if row:
             db.upsert("mensagens", [row], on_conflict="message_id")
+        return row
     except Exception:
         log.exception("falha arquivando mensagem")
 
