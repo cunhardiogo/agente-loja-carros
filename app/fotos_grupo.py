@@ -97,6 +97,67 @@ def novidades(texto: str, mid: str) -> dict:
     return {"criados": criados, "sem_placa": sem_placa}
 
 
+def _cartao_do_autocerto(c, carro: str, cards: list[dict], lista_id: str) -> str | None:
+    """'HR-V Touring 2021' sem cartão: acha UM carro no Autocerto e cria o cartão (se a placa não está no quadro)."""
+    from .vendas_grupo import placa_norm
+    ano = re.search(r"\b(?:19|20)\d{2}\b", carro or "")
+    modelo = re.sub(r"\b(?:19|20)\d{2}\b", "", carro or "").strip()
+    placa = placa_norm(_placa_autocerto(modelo, ano.group() if ano else None))
+    if not placa or any(trello._placa(cd["name"]) == placa for cd in cards):
+        return None
+    nome = trello.nome_cartao({"modelo": modelo, "ano": ano.group() if ano else None, "placa": placa}, None)
+    c.post("/cards", params={"idList": lista_id, "pos": "top", "name": nome}).raise_for_status()
+    cards.append({"name": nome, "idList": lista_id})
+    try:
+        evolution.enviar_texto(settings.meu_numero, f"📸 O Caio fotografou {carro} e não tinha cartão no Trello: "
+                                                    f"criei {nome} no Estoque (placa pelo Autocerto).")
+    except Exception:
+        log.exception("falha avisando cartão criado pelas fotos")
+    return nome
+
+
+def trocas_para_transito() -> list[str]:
+    """Carro que entrou na troca (avaliação fechada ou troca no resumo de venda) e ainda não está no quadro:
+    cria o cartão em "Carro em trânsito"."""
+    from .sheets import DESDE
+    from .vendas_grupo import placa_norm
+    vendas = [v for v in db.select_all("vendas", {"select": "id,troca_modelo,troca_placa,data_venda",
+                                                  "removido": "eq.false", "revenda": "eq.false",
+                                                  "status_venda": "in.(completa,aguardando_resumo,reservado)"})
+              if (v.get("data_venda") or "") >= DESDE]
+    ativas = {v["id"] for v in vendas}
+    trocas: dict[str, dict] = {}
+    for a in db.select_all("avaliacoes", {"select": "modelo,ano,placa,venda_id", "status": "eq.fechou",
+                                          "placa": "not.is.null"}):
+        if a.get("venda_id") in ativas and placa_norm(a["placa"]):  # só a troca de uma venda atual
+            trocas[placa_norm(a["placa"])] = {"modelo": a.get("modelo"), "ano": a.get("ano")}
+    for v in vendas:
+        p = placa_norm(v.get("troca_placa"))
+        if p:
+            trocas.setdefault(p, {"modelo": v.get("troca_modelo"), "ano": None})
+    if not trocas:
+        return []
+    criados = []
+    with trello._cliente() as c:
+        cards, listas = trello.cartoes(c)
+        no_quadro = {trello._placa(cd["name"]) for cd in cards}
+        transito = next(k for k, v in listas.items() if v == TRANSITO)
+        for placa, t in trocas.items():
+            if placa in no_quadro or not t.get("modelo"):
+                continue
+            nome = trello.nome_cartao({"modelo": t["modelo"], "ano": t.get("ano"), "placa": placa}, None)
+            c.post("/cards", params={"idList": transito, "pos": "top", "name": nome}).raise_for_status()
+            no_quadro.add(placa)
+            criados.append(nome)
+    if criados:
+        try:
+            evolution.enviar_texto(settings.meu_numero, "🔄 Carro de troca: criei em Carro em trânsito:\n"
+                                   + "\n".join(f"• {n}" for n in criados))
+        except Exception:
+            log.exception("falha avisando trocas")
+    return criados
+
+
 def completar_placas() -> list[str]:
     """Cartões sem placa (fora do FINALIZADO): acha a placa no Autocerto pelo modelo e ano e põe no nome do cartão.
     Só quando o Autocerto tem UM carro que bate e a placa ainda não está em outro cartão."""
@@ -203,6 +264,11 @@ def processar(data: dict, instancia: str, apikey: str, aplicar: bool = True) -> 
                   and listas.get(cd["idList"]) in PODE_MEXER]
         for carro in carros:
             card = trello.achar_cartao(carro, cards, listas) or trello.achar_cartao(carro, origem, listas)
+            if not card and destino == ESTOQUE and aplicar:  # fotografado e sem cartão: cria no Estoque pelo Autocerto
+                novo = _cartao_do_autocerto(c, carro, cards, por_nome[ESTOQUE])
+                if novo:
+                    resultado["criados"] = resultado.get("criados", []) + [novo]
+                    continue
             if not card:
                 resultado["nao_achados"].append(carro)
                 continue
