@@ -395,7 +395,7 @@ def _resumo(texto, mid, autor, em, historico, venda_id: str | None = None) -> di
             _venda_aberta_do_vendedor(campos["vendedor_id"],  # "Modelo: Yamaha / Versão: Xmax" — o carro pode estar na versão
                                       f"{campos['modelo'] or ''} {campos['versao'] or ''}")
     postou = vendedor_por_lid(autor, vends)
-    if existente and existente.get("vendedor_id"):  # vendedor já definido (aviso ou correção do dono) não muda
+    if existente and existente.get("vendedor_id") and not venda_id:  # vendedor já definido (aviso ou correção do dono) não muda; edição do resumo sim
         campos["vendedor_id"] = existente["vendedor_id"]
     elif vend and postou and vend["id"] != postou["id"] and not historico:
         try:

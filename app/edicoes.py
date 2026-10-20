@@ -5,6 +5,7 @@ import base64
 import hashlib
 import hmac
 import logging
+import re
 
 import httpx
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -14,6 +15,7 @@ from .config import settings
 log = logging.getLogger("agente")
 
 MESSAGE_EDIT = 2
+_JID = re.compile(r"[\w.:-]+@(s\.whatsapp\.net|lid|g\.us|c\.us|broadcast)")
 
 
 def _campos(buf: bytes):
@@ -68,7 +70,8 @@ def _textos(buf: bytes, prof: int = 0) -> list[str]:
 
 def _texto_editado(plano: bytes, alvo_id: str) -> str | None:
     """O texto novo é a maior string legível que não é jid, id nem lixo binário."""
-    cands = [t for t in _textos(plano) if t != alvo_id and "@" not in t and len(t.strip()) >= 2]
+    # jid sozinho fica de fora; texto com e-mail (ex.: resumo de venda) não
+    cands = [t for t in _textos(plano) if t != alvo_id and not _JID.fullmatch(t.strip()) and len(t.strip()) >= 2]
     # o campo de fora também decodifica como texto, com 1-3 bytes de cabeçalho na frente: fica o de dentro
     cands = [t for t in cands if not any(o != t and t.endswith(o) and len(t) - len(o) <= 3 for o in cands)]
     return max(cands, key=len).strip() if cands else None
