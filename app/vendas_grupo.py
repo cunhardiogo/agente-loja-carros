@@ -394,6 +394,16 @@ def _resumo(texto, mid, autor, em, historico, venda_id: str | None = None) -> di
         existente = _venda_por_msg(mid) or _venda_por_placa(campos["placa"]) or \
             _venda_aberta_do_vendedor(campos["vendedor_id"],  # "Modelo: Yamaha / Versão: Xmax" — o carro pode estar na versão
                                       f"{campos['modelo'] or ''} {campos['versao'] or ''}")
+    postou = vendedor_por_lid(autor, vends)
+    if existente and existente.get("vendedor_id"):  # vendedor já definido (aviso ou correção do dono) não muda
+        campos["vendedor_id"] = existente["vendedor_id"]
+    elif vend and postou and vend["id"] != postou["id"] and not historico:
+        try:
+            evolution.enviar_texto(settings.meu_numero,
+                                   f"O resumo do {_carro(campos)} foi postado pelo {postou['nome']} com 'Vendedor: "
+                                   f"{vend['nome']}'. Contei pro {vend['nome']}; se a venda for do {postou['nome']}, me avisa.")
+        except Exception:
+            log.exception("aviso de vendedor divergente")
     if existente:
         if existente.get("resumo_message_id") == mid:
             if not venda_id:

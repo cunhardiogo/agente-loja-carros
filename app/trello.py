@@ -172,7 +172,9 @@ def plano(c: httpx.Client) -> list[dict]:
             mudar["idList"] = por_nome[destino]
         vend = nomes.get(v.get("vendedor_id"))
         if vend and v["status_venda"] != "desistiu" and _ascii(vend) not in _ascii(card["name"]):
-            mudar["name"] = f"{card['name'].rstrip()} - {vend}"
+            base, _, fim = card["name"].rstrip().rpartition(" - ")
+            outro = base and _ascii(fim) in {_ascii(n) for n in nomes.values()}  # trocou o vendedor: substitui
+            mudar["name"] = f"{base if outro else card['name'].rstrip()} - {vend}"
         ativa = v["status_venda"] != "desistiu" and v.get("status_entrega") != "entregue"
         if ativa and listas.get(mudar.get("idList", card["idList"])) != FINALIZADO:
             due = _due({**v, "_horario": horarios.get(v["id"])})
