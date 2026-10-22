@@ -93,7 +93,10 @@ def registrar_pagamento(venda: str, valor: str, data: str | None = None, forma: 
     d = _dia(data)
     if not d:
         return {"erro": f"não entendi a data '{data}'"}
-    p = db.insert("pagamentos", {"venda_id": v["id"], "valor": vendas_grupo._valor(valor), "tipo": forma,
+    tipo = next((t for t in ("pix", "ted") if t in _ascii(forma or "")), None)
+    agora = datetime.now(timezone.utc)
+    p = db.insert("pagamentos", {"venda_id": v["id"], "valor": vendas_grupo._valor(valor), "tipo": tipo,
+                                 "message_id": f"dono-{agora.timestamp():.0f}-{v['id'][:8]}",
                                  "pago_em": _iso(datetime(d.year, d.month, d.day, 12, tzinfo=datas.TZ)),
                                  "autor": "dono", "recebido_em": _iso(datetime.now(timezone.utc)), "historico": False})
     vendas_grupo.recalcular(v["id"])
