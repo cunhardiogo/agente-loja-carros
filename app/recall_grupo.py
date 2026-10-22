@@ -42,7 +42,11 @@ Regras:
 - Carro com defeito/serviço a fazer que NÃO está na lista de abertos é "novo", mesmo em texto solto, mesmo
   perguntando quando trazer ou já trazendo o dia (aí preencha "quando" também).
 - Mensagem que só traz dia/hora pra um recall aberto (ou respondendo a ele) é "agendado".
-- Datas no formato brasileiro: 10/09 = 10 de setembro. Sem ano: o mais próximo de hoje."""
+- Datas no formato brasileiro: 10/09 = 10 de setembro. Sem ano: o mais próximo de hoje.
+- Mensagem curta continuando a conversa ("Vazando óleo", "e o amortecedor") fala do carro das mensagens
+  anteriores: use-as só para preencher "veiculo"/"placa"/"recall"; o tipo vem da mensagem atual.
+- "motivos" são defeitos do carro. Opinião ou comentário ("golpe", "manda trazer", "nunca vi isso") não é
+  motivo: é "info"."""
 
 
 def _rotulo(r: dict) -> str:
@@ -53,14 +57,31 @@ def _placa_fmt(p: str | None) -> str:
     return f"{p[:3]}-{p[3:]}" if p and len(p) == 7 else (p or "")
 
 
-def extrair(texto: str, citada: str | None, abertos: list[dict]) -> dict:
+def extrair(texto: str, citada: str | None, abertos: list[dict], anteriores: str | None = None) -> dict:
     lista = "\n".join(f"{i}. {_rotulo(r)} — {r.get('motivo') or ''}" for i, r in enumerate(abertos, 1)) or "(nenhum)"
     conteudo = texto if not citada else f"[respondendo a: {citada}]\n{texto}"
+    if anteriores:
+        conteudo = f"[mensagens anteriores no grupo]\n{anteriores}\n[mensagem atual]\n{conteudo}"
     resp = llm._client.chat.completions.create(
         model=settings.openai_model_extracao, temperature=0, response_format={"type": "json_object"},
         messages=[{"role": "system", "content": PROMPT.format(hoje=datas.hoje_iso(), abertos=lista)},
                   {"role": "user", "content": conteudo}])
     return json.loads(resp.choices[0].message.content or "{}")
+
+
+def _anteriores(em: datetime, mid: str | None) -> str:
+    """Últimas mensagens do grupo nos 15 min antes desta (pra saber de que carro fala uma mensagem curta)."""
+    rows = db.select("mensagens", {"select": "message_id,autor_nome,texto", "jid": f"eq.{GRUPO}",
+                                   "texto": "not.is.null", "em": f"gte.{_iso(em - timedelta(minutes=15))}",
+                                   "and": f"(em.lt.{_iso(em)})", "order": "em.desc", "limit": "6"})
+    return "\n".join(f"{m.get('autor_nome') or '?'}: {m['texto'][:300]}" for m in reversed(rows)
+                     if m["message_id"] != mid and not m["texto"].startswith("🔁"))
+
+
+def _mesmo_carro(veiculo: str | None, abertos: list[dict]) -> dict | None:
+    v = _ascii(veiculo or "").split()
+    achados = [r for r in abertos if v and r.get("veiculo") and _ascii(r["veiculo"]).split()[:1] == v[:1]]
+    return achados[0] if len(achados) == 1 else None
 
 
 def _abertos() -> list[dict]:
@@ -127,7 +148,8 @@ def processar(data: dict, historico: bool = False) -> dict:
     citado = _do_stanza(_stanza(data))
     abertos = _abertos()
     try:
-        it = extrair(texto, _rotulo(citado) + " — " + (citado.get("motivo") or "") if citado else None, abertos)
+        it = extrair(texto, _rotulo(citado) + " — " + (citado.get("motivo") or "") if citado else None, abertos,
+                     None if citado else _anteriores(em, mid))
     except Exception:
         log.exception("falha extraindo recall")
         db.delete("recall_msgs", {"message_id": f"eq.{mid}"})  # repescagem tenta de novo
@@ -141,7 +163,10 @@ def processar(data: dict, historico: bool = False) -> dict:
     if tipo == "agendado" and alvo is None and it.get("motivos"):
         tipo = it["tipo"] = "novo"  # "Toro Ranch, segunda 28/09, polimento": abre já agendado
     if tipo == "novo":
-        mesmo = next((r for r in abertos if placa and r.get("placa") == placa), None)
+        mesmo = next((r for r in abertos if placa and r.get("placa") == placa), None) \
+            or _mesmo_carro(it.get("veiculo"), [r for r in abertos if not (placa and r.get("placa"))])
+        if not mesmo and alvo is None and not placa and not it.get("veiculo"):
+            return {"ignored": "defeito_sem_carro"}  # não abre recall sem saber de que carro é
         if mesmo:  # carro com recall aberto: o motivo novo soma no mesmo
             alvo = mesmo
         elif alvo is None:

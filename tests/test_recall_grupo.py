@@ -7,7 +7,7 @@ from app import recall_grupo as rg
 
 class FakeDB:
     def __init__(self):
-        self.t = {"recalls": [], "recall_msgs": [], "vendas": []}
+        self.t = {"recalls": [], "recall_msgs": [], "vendas": [], "mensagens": []}
 
     def _match(self, row, params):
         for k, v in (params or {}).items():
@@ -74,7 +74,7 @@ def _msg(mid, texto, stanza=None, ts=1791800000):
 
 def test_formulario_abre_recall_e_resposta_pronto_fecha(fake, monkeypatch):
     db, abertos, fechados = fake
-    monkeypatch.setattr(rg, "extrair", lambda t, c, a: {
+    monkeypatch.setattr(rg, "extrair", lambda t, c, a, ant=None: {
         "tipo": "novo", "veiculo": "Duster", "placa": "QPH-4J66", "km_atual": 69562,
         "motivos": ["câmbio", "trava da porta"], "na_loja": False})
     r = rg.processar(_msg("m1", "Veículo: Duster / Placa: QPH-4J66 / Motivo do recall: câmbio / trava"))
@@ -83,22 +83,22 @@ def test_formulario_abre_recall_e_resposta_pronto_fecha(fake, monkeypatch):
     assert rec["placa"] == "QPH4J66" and rec["motivo"] == "câmbio / trava da porta" and rec["status"] == "aberto"
     assert abertos == [(rec["id"], None)]
 
-    monkeypatch.setattr(rg, "extrair", lambda t, c, a: {"tipo": "agendado", "quando": "2026-10-15T10:30",
+    monkeypatch.setattr(rg, "extrair", lambda t, c, a, ant=None: {"tipo": "agendado", "quando": "2026-10-15T10:30",
                                                         "quando_texto": "quinta 10h30"})
     rg.processar(_msg("m2", "cliente traz quinta 10h30", stanza="m1"))
     assert rec["status"] == "agendado" and rec["agendado_texto"] == "quinta 10h30"
 
-    monkeypatch.setattr(rg, "extrair", lambda t, c, a: {"tipo": "pronto"})
+    monkeypatch.setattr(rg, "extrair", lambda t, c, a, ant=None: {"tipo": "pronto"})
     rg.processar(_msg("m3", "Duster pronto, pode avisar o cliente", stanza="m2"))  # resposta em cadeia
     assert rec["status"] == "pronto" and fechados == [rec["id"]]
 
 
 def test_mesma_placa_soma_motivo(fake, monkeypatch):
     db, abertos, _ = fake
-    monkeypatch.setattr(rg, "extrair", lambda t, c, a: {"tipo": "novo", "veiculo": "T-Cross", "placa": "SRO2C68",
+    monkeypatch.setattr(rg, "extrair", lambda t, c, a, ant=None: {"tipo": "novo", "veiculo": "T-Cross", "placa": "SRO2C68",
                                                         "motivos": ["vazamento de óleo"]})
     rg.processar(_msg("a1", "Veículo: VW T-Cross / Placa: SRO2C68 / Motivo: vazamento"))
-    monkeypatch.setattr(rg, "extrair", lambda t, c, a: {"tipo": "novo", "veiculo": "T-Cross", "placa": "SRO2C68",
+    monkeypatch.setattr(rg, "extrair", lambda t, c, a, ant=None: {"tipo": "novo", "veiculo": "T-Cross", "placa": "SRO2C68",
                                                         "motivos": ["barulho na caixa de direção"]})
     rg.processar(_msg("a2", "Veículo: VW T-Cross / Placa: SRO2C68 / Motivo: barulho na caixa de direção"))
     assert len(db.t["recalls"]) == 1
@@ -107,7 +107,7 @@ def test_mesma_placa_soma_motivo(fake, monkeypatch):
 
 
 def test_ok_solto_e_conversa_sao_ignorados(fake, monkeypatch):
-    monkeypatch.setattr(rg, "extrair", lambda t, c, a: {"tipo": "info"})
+    monkeypatch.setattr(rg, "extrair", lambda t, c, a, ant=None: {"tipo": "info"})
     assert rg.processar(_msg("o1", "Ok")) == {"ignored": "sem_conteudo"}
     assert rg.processar(_msg("o2", "Esse cara tá maluco kkk")) == {"ignored": "conversa"}
 
@@ -134,3 +134,11 @@ def test_garantia_e_agenda(fake):
                             "placa": "QPH4J66", "motivo": "câmbio", "agendado_para": "2026-10-12T13:30:00+00:00",
                             "aberto_em": "2026-10-08T14:00:00+00:00"})
     assert "Duster QPH-4J66 (hoje 10:30): câmbio" in rg.agenda_texto("2026-10-12")
+
+
+def test_mesmo_carro_sem_placa():
+    from app import recall_grupo
+    abertos = [{"veiculo": "Duster", "placa": "QPH4J66"}, {"veiculo": "2008 2017", "placa": None}]
+    assert recall_grupo._mesmo_carro("2008 2017", abertos)["veiculo"] == "2008 2017"
+    assert recall_grupo._mesmo_carro(None, abertos) is None
+    assert recall_grupo._mesmo_carro("Civic", abertos) is None
