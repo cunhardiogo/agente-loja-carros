@@ -3,7 +3,7 @@ import io
 import httpx
 from openai import OpenAI
 
-from . import datas
+from . import datas, uso_ia
 from .config import settings
 from .schemas import Extracao
 
@@ -12,6 +12,7 @@ _kwargs = {"api_key": settings.openai_api_key, "http_client": _http}
 if settings.openai_base_url:  # LLM plugável: endpoint compatível-OpenAI
     _kwargs["base_url"] = settings.openai_base_url
 _client = OpenAI(**_kwargs) if settings.openai_api_key else None
+uso_ia.medir(_client)
 
 SYSTEM = """Você lê mensagens dos grupos de WhatsApp de uma loja de carros (Grupo SB) e extrai \
 eventos de negócio de forma estruturada. As mensagens podem ser conversa livre OU formulários padronizados \

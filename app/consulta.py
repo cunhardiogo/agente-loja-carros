@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import httpx
 from openai import OpenAI
 
-from . import datas, db
+from . import datas, db, uso_ia
 from .config import settings
 from .ingest import resolver_pessoa
 
@@ -16,6 +16,7 @@ _kwargs = {"api_key": settings.openai_api_key, "http_client": _http}
 if settings.openai_base_url:  # LLM plugável: endpoint compatível-OpenAI
     _kwargs["base_url"] = settings.openai_base_url
 _client = OpenAI(**_kwargs) if settings.openai_api_key else None
+uso_ia.medir(_client)
 
 _ctx = {"numero": None, "papel": "dono", "nome": "Diogo"}  # quem está conversando
 
