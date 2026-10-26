@@ -128,6 +128,10 @@ def _tick_inner() -> None:
         except Exception:
             log.exception("erro sincronizando Trello")
         try:
+            recall_grupo.sincronizar_trello()  # cartão de recall no FINALIZADO = recall resolvido
+        except Exception:
+            log.exception("erro fechando recalls pelo Trello")
+        try:
             fotos_grupo.trocas_para_transito()  # carro de troca → cartão em "Carro em trânsito"
         except Exception:
             log.exception("erro criando cartões de troca")

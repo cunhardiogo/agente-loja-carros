@@ -288,6 +288,28 @@ def _trello_fechar(c, r: dict) -> None:
     c.put(f"/cards/{r['trello_card_id']}", params={"idList": fin, "pos": "top", "dueComplete": "true"}).raise_for_status()
 
 
+def sincronizar_trello() -> list[str]:
+    """Cartão de recall aberto que alguém moveu pro FINALIZADO no Trello = recall resolvido (marca os itens e fecha)."""
+    abertos = [r for r in _abertos() if r.get("trello_card_id")]
+    if not abertos or not trello.configurado():
+        return []
+    fechados = []
+    with trello._cliente() as c:
+        cards, listas = trello.cartoes(c)
+        lista_de = {cd["id"]: listas.get(cd["idList"]) for cd in cards}
+        for r in abertos:
+            if lista_de.get(r["trello_card_id"]) != trello.FINALIZADO:
+                continue
+            upd = {"status": "pronto", "pronto_em": datas.agora().isoformat()}
+            db.update("recalls", upd, {"id": f"eq.{r['id']}"})
+            r.update(upd)
+            _trello_fechar(c, r)  # marca os itens do checklist (o cartão já está no FINALIZADO)
+            fechados.append(_rotulo(r))
+    if fechados:
+        sujo["v"] = True
+    return fechados
+
+
 # ===== aviso pro dono e agenda =====
 def checar(agora: datetime | None = None) -> int:
     if not AVISOS_ATIVOS:

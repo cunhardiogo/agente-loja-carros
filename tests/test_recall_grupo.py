@@ -142,3 +142,15 @@ def test_mesmo_carro_sem_placa():
     assert recall_grupo._mesmo_carro("2008 2017", abertos)["veiculo"] == "2008 2017"
     assert recall_grupo._mesmo_carro(None, abertos) is None
     assert recall_grupo._mesmo_carro("Civic", abertos) is None
+
+
+def test_cartao_no_finalizado_fecha_recall(fake, monkeypatch):
+    db, _, fechados = fake
+    db.t["recalls"].append({"id": "r1", "origem": "grupo", "status": "aberto", "trello_card_id": "c1",
+                              "veiculo": "Sandero", "placa": "LSB9B88", "checklist": {}, "aberto_em": "2026-10-19"})
+    db.t["recalls"].append({"id": "r2", "origem": "grupo", "status": "aberto", "trello_card_id": "c2",
+                              "veiculo": "Duster", "placa": "QPH4J66", "checklist": {}, "aberto_em": "2026-10-08"})
+    monkeypatch.setattr(rg.trello, "cartoes", lambda c: ([{"id": "c1", "idList": "F"}, {"id": "c2", "idList": "R"}],
+                                                          {"F": rg.trello.FINALIZADO, "R": rg.RECALL}))
+    assert rg.sincronizar_trello() == ["Sandero LSB-9B88"]
+    assert [r["status"] for r in db.t["recalls"]] == ["pronto", "aberto"] and fechados == ["r1"]
