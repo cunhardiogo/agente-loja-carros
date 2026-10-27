@@ -461,6 +461,19 @@ def _rotear_evento(body: dict) -> dict:
         if grupo and grupo.get("tipo") == "recall":
             return recall_grupo.processar(data)
 
+    # antes de ler mídia (IA paga): só segue o que o agente usa — grupo/conversa monitorada ou DM do dono/gerente
+    if jid.endswith("@g.us"):
+        if eh_assistente or not ingest.grupo_por_jid(jid):
+            return {"ignored": "grupo_nao_monitorado", "jid": jid}
+    else:
+        num = (key.get("senderPn") or key.get("remoteJidAlt") or jid).split("@")[0] if jid.endswith("@lid") \
+            else jid.split("@")[0]
+        monitorada = not eh_assistente and ingest.grupo_por_jid(jid)
+        consulta_ok = (eh_assistente or not settings.evolution_assist_instance) and not from_me \
+            and (num == settings.meu_numero or num in flags.operacionais())
+        if not monitorada and not consulta_ok:
+            return {"ignored": "dm_nao_autorizado"}
+
     # texto direto OU transcrição de áudio OU leitura de imagem
     texto = media.conteudo_texto(instancia, apikey, data)
     if not texto:

@@ -44,6 +44,15 @@ def medir(client) -> None:
         return resp
 
     client.chat.completions.create = wrapper
+    original_audio = client.audio.transcriptions.create
+
+    def audio(*a, **k):
+        resp = original_audio(*a, **k)
+        with _lock:
+            _delta[(datas.hoje_iso(), _origem(), k.get("model") or "whisper-1")][0] += 1
+        return resp
+
+    client.audio.transcriptions.create = audio
 
 
 def gravar() -> None:
@@ -71,7 +80,9 @@ def gravar() -> None:
                 d[2] += tout
 
 
-def custo(modelo: str, tin: int, tout: int) -> float:
+def custo(modelo: str, tin: int, tout: int, chamadas: int = 0) -> float:
+    if modelo.startswith("whisper"):
+        return chamadas * 0.006  # ~1 min por áudio (US$ 0,006/min)
     pi, po = PRECO.get(modelo, (2.0, 8.0))
     return tin / 1e6 * pi + tout / 1e6 * po
 
@@ -84,7 +95,7 @@ def resumo(dias: int = 7) -> dict:
     por_dia: dict = defaultdict(float)
     por_origem: dict = defaultdict(lambda: [0, 0.0])
     for r in rows:
-        c = custo(r["modelo"], r["tokens_in"], r["tokens_out"])
+        c = custo(r["modelo"], r["tokens_in"], r["tokens_out"], r["chamadas"])
         por_dia[r["dia"]] += c
         por_origem[f"{r['origem']} ({r['modelo']})"][0] += r["chamadas"]
         por_origem[f"{r['origem']} ({r['modelo']})"][1] += c
