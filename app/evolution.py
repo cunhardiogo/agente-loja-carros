@@ -29,7 +29,13 @@ def _assistente() -> tuple[str, str]:
 
 def enviar_texto(numero: str, texto: str) -> dict:
     inst, key = _assistente()
-    return _send(inst, key, numero, texto)
+    try:
+        return _send(inst, key, numero, texto)
+    except httpx.HTTPError:
+        if numero != settings.meu_numero or inst == settings.evolution_instance:
+            raise
+        # número do assistente fora do ar: o dono recebe pelo próprio número (mensagem pra si mesmo)
+        return _send(settings.evolution_instance, settings.evolution_apikey, numero, texto)
 
 
 def get_media_base64(instance: str, apikey: str, message_data: dict) -> tuple[str | None, str | None]:

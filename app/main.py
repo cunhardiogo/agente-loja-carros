@@ -306,6 +306,7 @@ def _checar_relatorios() -> None:
     for tipo, fn in _jobs_relatorio(dow, hhmm):
         if not _reservar_envio(tipo, hoje):  # reserva ANTES de enviar (anti-duplicado)
             continue
+        texto = None
         try:
             try:
                 planilha.sincronizar()
@@ -344,7 +345,9 @@ def _checar_relatorios() -> None:
                 evolution.enviar_relatorio(texto)
         except Exception:
             log.exception("erro enviando relatório %s", tipo)
-            db.delete("relatorios_enviados", {"tipo": f"eq.{tipo}", "data": f"eq.{hoje}"})  # libera p/ retry
+            if texto is None:  # falhou montando: tenta de novo. Falhou enviando: não repete (a véspera já
+                # mandou pros vendedores ao montar — repetir era mandar a mesma mensagem a cada minuto)
+                db.delete("relatorios_enviados", {"tipo": f"eq.{tipo}", "data": f"eq.{hoje}"})
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
