@@ -212,3 +212,9 @@ def test_venda_do_fulano_e_recado_nao_venda_nova(monkeypatch):
     r = vg._atribuicao("Venda do Edinho", "carlos@lid", datetime(2026, 10, 15, 21, 40, tzinfo=timezone.utc), vends)
     assert r == {"atribuida": "wrv", "vendedor": "Edson"} and trocas == [({"vendedor_id": "e1"}, "eq.wrv")]
     assert vg._atribuicao("Kwid vendido", "carlos@lid", datetime(2026, 10, 15, tzinfo=timezone.utc), vends) is None
+
+
+def test_reserva_no_inicio_da_frase():
+    from app import vendas_grupo
+    assert vendas_grupo.classificar_aviso("Reserva c3 2023 automático") == "reserva"
+    assert vendas_grupo.classificar_aviso("Golf reservado") == "reserva"

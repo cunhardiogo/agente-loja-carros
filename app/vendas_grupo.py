@@ -173,7 +173,7 @@ def classificar_aviso(texto: str) -> str | None:
         return None
     if re.search(r"\b(caiu|cancelad[oa]|desisti[ru]|desistencia|nao vai mais levar)\b", a):
         return "queda"
-    if re.search(r"\breservad[oa]s?\b", a):
+    if re.search(r"\breservad[oa]s?\b", a) or re.match(r"^reserva\b", a):  # "Reserva c3 2023 automático"
         return "reserva"
     if re.search(r"\b(vendid[oa]|vendeu)\b", a) or re.match(r"^venda\b", a):
         return "venda"
