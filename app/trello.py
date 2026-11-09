@@ -132,6 +132,10 @@ def plano(c: httpx.Client) -> list[dict]:
     vendas = db.select_all("vendas", {"select": "*", "removido": "eq.false", "origem": "in.(grupo,planilha)",
                                       "status_venda": "in.(completa,aguardando_resumo,reservado,desistiu)"})
     acoes = []
+    # venda que caiu não devolve ao estoque o carro que foi vendido de novo (ex.: reserva antiga do mesmo carro)
+    vivas = [v for v in vendas if v["status_venda"] != "desistiu" and not v.get("revenda")]
+    ocupados = {v["trello_card_id"] for v in vivas if v.get("trello_card_id")} | \
+        {(v.get("placa") or "").replace("-", "").upper() for v in vivas if v.get("placa")}
     for v in vendas:
         if v.get("revenda") or (v.get("data_venda") or (v.get("reservado_em") or "")[:10] or v["created_at"][:10]) < DESDE:
             continue
@@ -158,6 +162,8 @@ def plano(c: httpx.Client) -> list[dict]:
             continue  # dono finalizou o cartão no Trello → a venda é dada como entregue
         destino = None
         if v["status_venda"] == "desistiu":
+            if card["id"] in ocupados or _placa(card["name"]) in ocupados:
+                continue
             destino = ESTOQUE if lista == VENDIDOS else None
         elif v.get("status_entrega") == "entregue":
             if lista == VENDIDOS and v.get("finalizado_pelo_agente_em"):
