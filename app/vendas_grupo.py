@@ -171,7 +171,8 @@ def classificar_aviso(texto: str) -> str | None:
     a = _ascii(texto).strip()
     if not a or len(a) > 120 or eh_resumo(texto) or "?" in a:
         return None
-    if re.search(r"\b(caiu|cancelad[oa]|desisti[ru]|desistencia|nao vai mais levar)\b", a):
+    if re.search(r"\b(caiu|cancelad[oa]|desisti[ru]|desistencia|nao vai mais levar)\b", a) or \
+            re.search(r"\b(volta|voltou|voltar)\s+(para|pra|pro|ao)\s+(o\s+)?estoque\b", a):  # "Sandero 12 volta para o estoque"
         return "queda"
     if re.search(r"\breservad[oa]s?\b", a) or re.match(r"^reserva\b", a):  # "Reserva c3 2023 automático"
         return "reserva"
@@ -297,7 +298,8 @@ def _queda(texto, autor, em) -> dict:
     alvo = _venda_por_placa(placa_norm(texto))
     if not alvo:
         toks = [t for t in _ascii(_modelo_do_aviso(texto)).split() if len(t) >= 3
-                and t not in ("caiu", "cancelada", "cancelado", "desistiu", "desistir", "cliente", "venda")]
+                and t not in ("caiu", "cancelada", "cancelado", "desistiu", "desistir", "cliente", "venda",
+                                    "volta", "voltou", "voltar", "para", "pra", "pro", "estoque")]
         rows = db.select("vendas", {"select": "*", "removido": "eq.false",
                                     "status_venda": "in.(aguardando_resumo,completa,reservado)",
                                     "order": "created_at.desc", "limit": "60"})

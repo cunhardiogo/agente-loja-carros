@@ -69,6 +69,7 @@ def test_aviso_curto_e_reserva():
     assert vg.classificar_aviso("Hrv 2019 vendida ✅") == "venda"
     assert vg.classificar_aviso("Venda Vinicius") == "venda"
     assert vg.classificar_aviso("Pulse Hybrid reservado") == "reserva"
+    assert vg.classificar_aviso("Sandero 12 volta para o estoque") == "queda"
     assert vg.classificar_aviso("Recorde de vendas no dia?") is None
     assert vg.classificar_aviso(RESUMO) is None
     assert vg.placa_norm("Fit 2018 LUH6H38 vendido ✅") == "LUH6H38"
